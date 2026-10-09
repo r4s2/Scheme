@@ -1,19 +1,44 @@
 import Link from "next/link";
-import styles from "./page.module.css";
+import { GAMES } from "@/engine";
+import ui from "@/components/ui.module.css";
+import { getStore, isDemoStore } from "@/server/store";
+import { currentActor } from "@/server/session";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+const STATUS: Record<string, string> = {
+  draft: "Draft",
+  registration: "Registration open",
+  checkin: "Check-in open",
+  live: "Live",
+  complete: "Closed",
+  cancelled: "Cancelled",
+};
+
+export default async function Home() {
+  const [list, actor] = await Promise.all([getStore().list(), currentActor()]);
   return (
-    <main className={styles.page}>
-      <h1 className={styles.title}>Scheme</h1>
-      <p className={styles.lead}>
-        Find, host and run esports tournaments for Valorant, League of Legends, Overwatch and Marvel Rivals, with verified
-        ranks, balanced teams and an AI co-pilot for hosts. This is the start of the real app; the clickable prototype shows
-        where it is headed.
+    <main className={ui.page}>
+      <h1 className={ui.title}>Tournaments</h1>
+      <p className={ui.lead} style={{ marginTop: 8 }}>
+        {isDemoStore()
+          ? "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."
+          : "Live data from the database."}
       </p>
-      <div className={styles.links}>
-        <Link className={`${styles.link} ${styles.primary}`} href="/demo">
-          See the bracket engine
-        </Link>
+      <div className={ui.grid2}>
+        {list.map((t) => (
+          <Link key={t.id} href={`/t/${t.id}`} className={ui.card} style={{ textDecoration: "none", color: "inherit" }}>
+            <div className={ui.row} style={{ justifyContent: "space-between" }}>
+              <span className={ui.pill}>{GAMES[t.game].name}</span>
+              <span className={`${ui.pill} ${t.status === "live" ? ui.pillBad : t.status === "complete" ? ui.pillGood : ui.pillInfo}`}>{STATUS[t.status]}</span>
+            </div>
+            <h3 style={{ marginTop: 10, fontSize: 18 }}>{t.name}</h3>
+            <p className={`${ui.small} ${ui.muted}`}>
+              Hosted by {t.host}
+              {actor === t.host ? " (you)" : ""}
+            </p>
+          </Link>
+        ))}
       </div>
     </main>
   );

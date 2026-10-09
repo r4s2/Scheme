@@ -3,23 +3,38 @@
 ## Principles
 
 - **The engine decides; the database remembers.** `src/engine` derives matches, standings, champions, deadlines and prizes from stored facts. Nothing derived is stored, so the bracket can't drift out of sync with its results.
-- **Trusted writes only.** Anything that changes a tournament, a result, a rank, karma or money goes through server code that checks permissions, runs the engine, and then writes with the service role. Row-level security gives clients read access only (plus marking their own notifications read and editing their own profile).
+- **One operation, one save.** Every change is a pure function in `src/server/operations.ts` that takes a tournament and a request and returns the new tournament plus effects (audit entries and notifications). Pages never change data any other way.
+- **Permissions live in operations.** Each operation checks who is acting (host, captain in the match, player on a team) before doing anything, so every caller gets the same rules.
+- **Simultaneous edits are safe.** Stores save with the version they loaded and refuse stale saves, so two hosts, or a host and a background job, can't silently overwrite each other.
+- **Trusted writes only.** Server code writes through the store with full database access, after an operation has checked permissions. Row-level security gives browsers read access only.
 - **Money in cents.** Prize math uses integers; leftover cents go to higher places so every cent in the pool is paid.
 - **Scheme never holds a balance.** Payment and payout rows mirror what the payment provider holds and moves.
-- **The agent proposes, the host approves.** The Scheme Agent calls engine functions to build proposals. Nothing applies until the host confirms, and every change is written to `audit_log`.
+- **The agent will propose, the host approves.** The Scheme Agent will produce operation requests from this same list; nothing applies until the host confirms, and every change is logged.
 
-## Engine modules
+## Request flow
+
+```
+form (server action) → store.get(id) → operation(agg, ctx, request) → store.commit(prev, outcome) → redirect with message
+```
+
+`ctx` carries the time, the actor and an id generator, so operations are deterministic and easy to test.
+
+## Modules
 
 | Module | Responsibility |
 | --- | --- |
-| `bracket.ts` | Builds brackets for single and double elimination, round robin, Swiss, and groups → playoffs. Standings, playable matches, and whether a result can still be edited. |
-| `results.ts` | Records and reopens results with validation; compares captain reports (confirm or dispute). |
-| `seeding.ts` | Locked slots, randomize, seed by rank, swaps, and whether the format can still change. |
-| `balance.ts` | Builds teams from solo sign-ups (even teams or rank tiers) and ranks substitutes. |
-| `schedule.ts` | Wave deadlines, extensions, match status, auto-confirm and payout release times. |
-| `compliance.ts` | Publisher naming rules and money rules for Riot, Blizzard and NetEase. |
-| `payouts.ts` | Final places (bracket, pick, co-winners, standings), prize splits, per-player shares, tax-form threshold. |
-| `games.ts` | Game ladders, roles and rank names. |
+| `engine/bracket.ts` | Brackets for single and double elimination, round robin, Swiss, and groups → playoffs; standings; whether a result can still change. |
+| `engine/results.ts` | Recording and reopening results; comparing captain reports. |
+| `engine/seeding.ts` | Locked slots, randomize, seed by rank, swaps, format changes. |
+| `engine/balance.ts` | Teams from solo sign-ups; substitute ranking. |
+| `engine/schedule.ts` | Wave deadlines, extensions, match status, auto-confirm and payout release times. |
+| `engine/compliance.ts` | Publisher naming and money rules. |
+| `engine/payouts.ts` | Final places, prize splits, per-player shares, tax-form threshold. |
+| `server/operations.ts` | All tournament operations and background jobs. |
+| `server/views.ts` | Match desk and other read-only views. |
+| `server/store/memory.ts` | In-memory store for the demo and tests. |
+| `server/store/postgres.ts` | Postgres store; one transaction per save. |
+| `server/session.ts` | Who is acting. Development uses the "Acting as" switcher until Supabase Auth is wired in. |
 
 ## Result keys
 
@@ -29,7 +44,5 @@ A match result is stored under the engine's `resultKey`: the two team ids sorted
 
 - **Web app:** Next.js on Vercel.
 - **Database, auth, realtime, storage:** Supabase.
-- **Workers** on a small always-on host:
-  - the Discord bot (a serverless function can't hold Discord's gateway connection);
-  - a job runner for deadline reminders, auto-confirming reports after 12 hours, and releasing payouts after the dispute window.
-- **Scheme Agent:** a language model with tools that call the engine and propose changes; conversations are stored in `agent_messages`.
+- **Workers** on a small always-on host: the Discord bot, and a job runner calling `runDueJobs` for reminders, auto-confirming reports and releasing payouts.
+- **Scheme Agent:** a language model whose tools are the operations above, run as proposals for host approval.
