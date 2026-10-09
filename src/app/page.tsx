@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { GAMES } from "@/engine";
 import ui from "@/components/ui.module.css";
-import { getStore, isDemoStore } from "@/server/store";
+import { getStore, storeMode } from "@/server/store";
 import { currentActor } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +21,9 @@ export default async function Home() {
     <main className={ui.page}>
       <h1 className={ui.title}>Tournaments</h1>
       <p className={ui.lead} style={{ marginTop: 8 }}>
-        {isDemoStore()
-          ? "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."
-          : "Live data from the database."}
+        {storeMode() === "database"
+          ? "Live data from the database."
+          : "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."}
       </p>
       <div className={ui.grid2}>
         {list.map((t) => (

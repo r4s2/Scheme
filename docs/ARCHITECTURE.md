@@ -34,6 +34,7 @@ form (server action) → store.get(id) → operation(agg, ctx, request) → stor
 | `server/views.ts` | Match desk and other read-only views. |
 | `server/store/memory.ts` | In-memory store for the demo and tests. |
 | `server/store/postgres.ts` | Postgres store; one transaction per save. |
+| `server/store/fallback.ts` | Development only: uses the database when it answers and demo data when it doesn't, reconnecting on its own. |
 | `server/session.ts` | Who is acting. Development uses the "Acting as" switcher until Supabase Auth is wired in. |
 
 ## Result keys

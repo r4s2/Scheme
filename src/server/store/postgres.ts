@@ -6,6 +6,29 @@ import { ConflictError, type Store, type StoredNotice, type TournamentSummary } 
 type Sql = postgres.Sql;
 
 /**
+ * Connection settings for a database URL. Supabase connections are always
+ * encrypted unless the URL sets sslmode itself. Prepared statements are off
+ * so Supabase's transaction pooler (port 6543) works too.
+ */
+export function connectionOptions(url: string): postgres.Options<Record<string, postgres.PostgresType>> {
+  let host = "";
+  let sslmode: string | null = null;
+  try {
+    const u = new URL(url);
+    host = u.hostname;
+    sslmode = u.searchParams.get("sslmode");
+  } catch {
+    // Not a parseable URL; postgres.js will report the problem when it connects.
+  }
+  const supabase = host.endsWith(".supabase.co") || host.endsWith(".supabase.com");
+  return {
+    prepare: false,
+    connect_timeout: 10,
+    ...(supabase && !sslmode ? { ssl: "require" as const } : {}),
+  };
+}
+
+/**
  * Postgres-backed store for trusted server code. Connects with the database
  * connection string (DATABASE_URL), which bypasses row-level security, so
  * only call it after an operation has checked permissions.
@@ -19,7 +42,17 @@ export class PostgresStore implements Store {
   constructor(private readonly sql: Sql) {}
 
   static fromUrl(url: string) {
-    return new PostgresStore(postgres(url, { max: 5, prepare: false }));
+    return new PostgresStore(postgres(url, { ...connectionOptions(url), max: 5 }));
+  }
+
+  /** Resolves if the database answers within a few seconds; used to decide whether to fall back in development. */
+  static async ping(url: string, timeoutSeconds = 5): Promise<void> {
+    const sql = postgres(url, { ...connectionOptions(url), max: 1, connect_timeout: timeoutSeconds, onnotice: () => {} });
+    try {
+      await sql`select 1`;
+    } finally {
+      await sql.end({ timeout: 1 }).catch(() => {});
+    }
   }
 
   async close() {

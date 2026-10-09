@@ -5,7 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import type { CloseMethod, FormatId } from "@/engine";
 import { OperationError, type Ctx, type Outcome, type TournamentAgg } from "@/server/model";
 import * as op from "@/server/operations";
-import { ConflictError, getStore } from "@/server/store";
+import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
 
 const FORMATS: FormatId[] = ["single", "double", "rr", "swiss", "groups"];
@@ -114,7 +114,7 @@ export async function runOperation(fd: FormData) {
       await store.commit(agg, out);
       message = out.message;
     } catch (e) {
-      if (!(e instanceof OperationError) && !(e instanceof ConflictError)) throw e;
+      if (!(e instanceof OperationError) && !(e instanceof ConflictError) && !(e instanceof DatabaseUnavailableError)) throw e;
       ok = false;
       message = e.message;
     }

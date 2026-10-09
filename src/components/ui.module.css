@@ -63,6 +63,7 @@
 .right { text-align: right; }
 
 .topbar { border-bottom: 1px solid var(--line); background: var(--bg); position: sticky; top: 0; z-index: 10; }
+.offline { margin: 0; padding: 6px 16px; text-align: center; font-size: 13px; color: var(--ink); background: var(--surface-2); border-bottom: 1px solid var(--line); }
 .topbarInner { max-width: 1240px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .brand { font-weight: 800; font-size: 18px; letter-spacing: -0.02em; color: var(--ink); text-decoration: none; }
 .nav { display: flex; gap: 12px; flex: 1; }

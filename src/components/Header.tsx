@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { setActor } from "@/app/actions";
-import { getStore } from "@/server/store";
+import { getStore, storeMode } from "@/server/store";
 import { actingAsEnabled, currentActor } from "@/server/session";
 import ui from "./ui.module.css";
 
@@ -23,8 +23,14 @@ export async function Header() {
   const actor = await currentActor();
   const unread = actor ? (await getStore().notifications(actor)).filter((n) => !n.read).length : 0;
   const people = actingAsEnabled() ? await knownPeople() : [];
+  const offline = storeMode() === "offline";
   return (
     <header className={ui.topbar}>
+      {offline && (
+        <p className={ui.offline} role="status">
+          Can&rsquo;t reach the database from this network, so you&rsquo;re seeing demo data. Scheme reconnects on its own when it can.
+        </p>
+      )}
       <div className={ui.topbarInner}>
         <Link href="/" className={ui.brand}>
           scheme

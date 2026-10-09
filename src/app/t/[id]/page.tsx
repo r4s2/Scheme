@@ -11,7 +11,7 @@ import { HostBracket } from "@/components/tournament/HostBracket";
 import { PlayerMatch } from "@/components/tournament/PlayerMatch";
 import { formatWhen } from "@/lib/format";
 import { runDueJobs, teamOf } from "@/server/operations";
-import { ConflictError, getStore } from "@/server/store";
+import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
 import { deskItems } from "@/server/views";
 
@@ -45,8 +45,10 @@ export default async function TournamentPage({
     try {
       agg = await store.commit(agg, jobs);
     } catch (e) {
-      if (!(e instanceof ConflictError)) throw e;
-      agg = (await store.get(id))!;
+      if (!(e instanceof ConflictError) && !(e instanceof DatabaseUnavailableError)) throw e;
+      const fresh = await store.get(id);
+      if (!fresh) notFound();
+      agg = fresh;
     }
   }
 
