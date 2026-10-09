@@ -1,42 +1,32 @@
+/* Placeholder tokens taken from the prototype. A design-language pass will replace these. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #edeff4;
+  --surface: #ffffff;
+  --surface-2: #f5f6fa;
+  --ink: #12141c;
+  --muted: #5b6172;
+  --line: #d6dae4;
+  --dot: #cdd2de;
+  --accent: #2f46e6;
+  --gold: #a87708;
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
-
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  html {
+    --bg: #0d0f15;
+    --surface: #161922;
+    --surface-2: #12151d;
+    --ink: #e7e9f0;
+    --muted: #9298a9;
+    --line: #282e3d;
+    --dot: #232838;
+    --accent: #7086ff;
+    --gold: #e3b443;
     color-scheme: dark;
   }
 }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+a { color: var(--accent); }
