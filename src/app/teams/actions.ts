@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { changed } from "@/server/data";
 import type { GameId } from "@/engine";
 import { OperationError, type Roster } from "@/server/model";
 import * as rosters from "@/server/rosters";
@@ -37,6 +38,7 @@ export async function teamAction(_prev: TeamResult | null, fd: FormData): Promis
     }
     await store.saveRoster(out.roster);
     await store.notify(out.notices);
+    changed();
     revalidatePath("/teams");
     return { ok: true, message: out.message, at };
   } catch (e) {

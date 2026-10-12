@@ -13,7 +13,9 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. With no database configured, the app runs on the sample data kept in memory: the same tournaments `npm run db:setup` loads into a database.
+Open http://localhost:3000. `npm run dev` recompiles pages as you open them, so the first visit to each page is slow; `npm run preview` builds the app and runs it the way it will run in production (still with the "Acting as" switcher), which is the fair way to judge speed.
+
+With no database configured, the app runs on the sample data kept in memory: the same tournaments `npm run db:setup` loads into a database.
 
 - **Browse:** search, game and format filters, and the tournament library: eight events taking sign-ups across all four games.
 - **Leaderboards:** ranked by tournaments won, from forty closed events. The home page rotates through them.

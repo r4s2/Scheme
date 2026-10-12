@@ -121,8 +121,9 @@ export function BracketBoard(props: BracketBoardProps) {
     });
   }, [view]);
 
-  // Wires between matches, as in the prototype.
-  useLayoutEffect(() => {
+  // Wires between matches, as in the prototype. Redrawn whenever the board renders or changes size
+  // (including when its tab is shown again).
+  const drawWires = useCallback(() => {
     root.current?.querySelectorAll<HTMLElement>(".bracket").forEach((br) => {
       const svg = br.querySelector("svg.wires");
       if (!svg) return;
@@ -143,7 +144,15 @@ export function BracketBoard(props: BracketBoardProps) {
       });
       svg.innerHTML = `<path d="${d}"/>`;
     });
-  });
+  }, []);
+  useLayoutEffect(drawWires);
+  useEffect(() => {
+    if (!root.current) return;
+    const ro = new ResizeObserver(drawWires);
+    ro.observe(root.current);
+    document.fonts?.ready.then(drawWires).catch(() => {});
+    return () => ro.disconnect();
+  }, [drawWires]);
 
   // ---------------------------------------------------------------------------
   // Saving: show the change now, save it, and settle on what the server stored.

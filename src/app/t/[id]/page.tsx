@@ -13,6 +13,7 @@ import { PlayerMatch } from "@/components/tournament/PlayerMatch";
 import { Announcements, Tickets } from "@/components/tournament/Community";
 import { Registration, type SignupContext } from "@/components/tournament/Registration";
 import { Stats } from "@/components/tournament/Stats";
+import { Tabs } from "@/components/tournament/Tabs";
 import { WinnerPopup } from "@/components/tournament/WinnerPopup";
 import { dollars, formatWhen } from "@/lib/format";
 import { teamWins } from "@/server/data";
@@ -77,10 +78,13 @@ export default async function TournamentPage({
   if (isHost && open && !registering) tabs.push(["close", "Close"]);
   if (isHost) tabs.push(["log", "Change log"]);
   const tab = tabs.some((t) => t[0] === sp.tab) ? sp.tab! : tabs[0][0];
-  const log = tab === "log" ? await store.auditLog(id) : [];
 
-  const wins = await teamWins(agg.game);
-  const signup = registering && actor && !isHost ? await signupContext(agg, actor) : { actor, rosters: [], soloBlocker: null };
+  // Everything the tabs need, fetched together so switching tabs needs no further round trips.
+  const [wins, signup, log] = await Promise.all([
+    teamWins(agg.game),
+    registering && actor && !isHost ? signupContext(agg, actor) : Promise.resolve<SignupContext>({ actor, rosters: [], soloBlocker: null }),
+    isHost ? store.auditLog(id) : Promise.resolve([]),
+  ]);
   const pill: Record<string, [string, string]> = {
     draft: ["quiet", "Draft"],
     registration: ["info", "Registration open"],
@@ -130,62 +134,56 @@ export default async function TournamentPage({
         </div>
       )}
 
-      <nav className="tabs" aria-label="Sections">
-        {tabs.map(([key, label, n]) => (
-          <Link key={key} href={`/t/${id}?tab=${key}`} className="tab" aria-selected={key === tab} aria-current={key === tab ? "page" : undefined} style={{ textDecoration: "none" }}>
-            {label}
-            {n ? <span className="count">{n}</span> : null}
-          </Link>
-        ))}
-      </nav>
-
-      {tab === "bracket" &&
-        (agg.status === "registration" ? (
-          <Registration agg={agg} now={now} isHost={isHost} wins={wins} signup={signup} />
-        ) : (
-          <>
-            <FinalResults agg={agg} />
-            {isHost ? (
-              <HostBracket agg={agg} now={now} editable={open} wins={wins} />
+      <Tabs
+        tabs={tabs.map(([key, label, count]) => ({ key, label, count }))}
+        initial={tab}
+        panels={{
+          bracket:
+            agg.status === "registration" ? (
+              <Registration agg={agg} now={now} isHost={isHost} wins={wins} signup={signup} />
             ) : (
-              <BracketBoard {...boardProps(agg, now, { mine: onTeam, wins })} />
-            )}
-          </>
-        ))}
-      {tab === "desk" && <Desk agg={agg} now={now} />}
-      {tab === "stats" && <Stats agg={agg} />}
-      {tab === "announce" && <Announcements agg={agg} isHost={isHost} />}
-      {tab === "tickets" && <Tickets agg={agg} actor={actor} isHost={isHost} />}
-      {tab === "checkin" && <Checkin agg={agg} />}
-      {tab === "close" && <ClosePanel agg={agg} />}
-      {tab === "match" && actor && (
-        <>
-          <FinalResults agg={agg} />
-          <PlayerMatch agg={agg} actor={actor} now={now} />
-        </>
-      )}
-      {tab === "log" && (
-        <div className="card panel">
-          <p className="lead">Every change to the bracket, schedule and results, with who made it.</p>
-          {log.length === 0 ? (
-            <p className="muted">No changes yet.</p>
-          ) : (
-            <ul className="log">
-              {[...log].reverse().map((e, i) => (
-                <li key={i}>
-                  <span className="small muted">
-                    {formatWhen(e.at)}
-                    <br />
-                    {e.actor}
-                    {e.viaAgent ? " via Scheme Agent" : ""}
-                  </span>
-                  <span>{e.summary}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+              <>
+                <FinalResults agg={agg} />
+                {isHost ? <HostBracket agg={agg} now={now} editable={open} wins={wins} /> : <BracketBoard {...boardProps(agg, now, { mine: onTeam, wins })} />}
+              </>
+            ),
+          desk: isHost && !registering ? <Desk agg={agg} now={now} /> : null,
+          stats: hasTeams ? <Stats agg={agg} /> : null,
+          announce: <Announcements agg={agg} isHost={isHost} />,
+          tickets: isHost || inEvent ? <Tickets agg={agg} actor={actor} isHost={isHost} /> : null,
+          checkin: isHost && agg.status === "checkin" ? <Checkin agg={agg} /> : null,
+          close: isHost && open && !registering ? <ClosePanel agg={agg} /> : null,
+          match:
+            actor && onTeam && !isHost && !registering ? (
+              <>
+                <FinalResults agg={agg} />
+                <PlayerMatch agg={agg} actor={actor} now={now} />
+              </>
+            ) : null,
+          log: isHost ? (
+            <div className="card panel">
+              <p className="lead">Every change to the bracket, schedule and results, with who made it.</p>
+              {log.length === 0 ? (
+                <p className="muted">No changes yet.</p>
+              ) : (
+                <ul className="log">
+                  {[...log].reverse().map((e, i) => (
+                    <li key={i}>
+                      <span className="small muted">
+                        {formatWhen(e.at)}
+                        <br />
+                        {e.actor}
+                        {e.viaAgent ? " via Scheme Agent" : ""}
+                      </span>
+                      <span>{e.summary}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null,
+        }}
+      />
       {won && myTeam && (
         <WinnerPopup
           id={`${agg.id}:${actor}`}

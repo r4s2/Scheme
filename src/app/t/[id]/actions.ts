@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { changed } from "@/server/data";
 import type { CloseMethod, FormatId, TournamentState } from "@/engine";
 import { OperationError, type Ctx, type Outcome, type TournamentAgg } from "@/server/model";
 import * as op from "@/server/operations";
@@ -169,6 +170,7 @@ export async function runOp(_prev: OpResult | null, fd: FormData): Promise<OpRes
   try {
     const out = await dispatch(name, agg, { now: new Date(), actor, newId: () => crypto.randomUUID() }, fd, store);
     const saved = await store.commit(agg, out);
+    changed();
     revalidatePath(`/t/${id}`);
     return { ok: true, message: out.message, at, state: saved.state, version: saved.version };
   } catch (e) {

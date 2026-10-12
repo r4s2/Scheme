@@ -13,7 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "check": "npm run lint && npm run typecheck && npm test",
     "db:setup": "node scripts/db-setup.mjs",
-    "seed:generate": "tsx scripts/generate-seed.ts"
+    "seed:generate": "tsx scripts/generate-seed.ts",
+    "preview": "next build && SCHEME_DEV_ACTORS=1 next start"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

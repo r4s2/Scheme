@@ -47,7 +47,7 @@ export class PostgresStore implements Store {
   static fromUrl(url: string) {
     // SCHEME_SQL_LOG=1 prints every query, to spot pages that make too many round trips.
     const debug = process.env.SCHEME_SQL_LOG === "1" ? (_c: number, q: string) => console.log(`[sql] ${q.replace(/\s+/g, " ").slice(0, 90)}`) : undefined;
-    return new PostgresStore(postgres(url, { ...connectionOptions(url), max: 10, debug }));
+    return new PostgresStore(postgres(url, { ...connectionOptions(url), max: 15, debug }));
   }
 
   /** Resolves if the database answers within a few seconds; used to decide whether to fall back in development. */
@@ -146,13 +146,14 @@ export class PostgresStore implements Store {
 
   async get(id: string): Promise<TournamentAgg | null> {
     const sql = this.sql;
-    const [t] = await sql`
-      select t.*, p.handle as host_handle
-      from tournaments t join profiles p on p.id = t.host_id
-      where t.id = ${id}`;
-    if (!t) return null;
-
-    const [teamRows, results, reports, disputes, extensions, entries, payouts, places, prizes, announcements, tickets] = await Promise.all([
+    // Not a tournament id: nothing to load (and no query with a malformed uuid).
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+    // Every part of the tournament in one round of parallel queries.
+    const [[t], teamRows, results, reports, disputes, extensions, entries, payouts, places, prizes, announcements, tickets] = await Promise.all([
+      sql`
+        select t.*, p.handle as host_handle
+        from tournaments t join profiles p on p.id = t.host_id
+        where t.id = ${id}`,
       sql`
         select tt.id, tt.name, cp.handle as captain,
                coalesce(json_agg(json_build_object(
@@ -197,6 +198,7 @@ export class PostgresStore implements Store {
         from tickets k join profiles op on op.id = k.opened_by
         where k.tournament_id = ${id} order by k.created_at`,
     ]);
+    if (!t) return null;
 
     const teams: Record<string, Team> = {};
     for (const r of teamRows) teams[r.id] = { id: r.id, name: r.name, captain: r.captain, players: r.players as Player[] };

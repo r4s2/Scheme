@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { changed } from "@/server/data";
 import { createTournament, type Draft } from "@/server/create";
 import { OperationError } from "@/server/model";
 import { DatabaseUnavailableError, getStore } from "@/server/store";
@@ -17,6 +18,7 @@ export async function publishTournament(draft: Draft): Promise<PublishResult> {
     const [host] = await store.profiles([actor]);
     const out = createTournament(draft, { now: new Date(), actor, newId: () => crypto.randomUUID() }, host);
     const saved = await store.create(out.agg, out.effects);
+    changed();
     revalidatePath("/");
     return { ok: true, id: saved.id, message: out.message };
   } catch (e) {
