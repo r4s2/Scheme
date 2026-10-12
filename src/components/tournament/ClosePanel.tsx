@@ -5,6 +5,9 @@ import ui from "../ui.module.css";
 import { Op } from "./Op";
 
 export function ClosePanel({ agg }: { agg: TournamentAgg }) {
+  if (agg.status !== "live") {
+    return <p className={ui.muted}>{agg.status === "complete" ? "This tournament is already closed." : "Start the tournament before closing it."}</p>;
+  }
   const tid = agg.id;
   const b = bracketOf(agg);
   const name = (id: string) => agg.state.teams[id]?.name ?? id;
@@ -12,10 +15,6 @@ export function ClosePanel({ agg }: { agg: TournamentAgg }) {
   const preview = finalPlaces(b, { method: b.complete ? "bracket" : "standings" });
   const prizes = pool ? allocatePrizes(pool, agg.payoutSplit, preview.places) : [];
   const defaultMessage = `${agg.name} is closed. Congratulations to ${preview.places[0].map(name).join(" and ")}! Thanks to all ${agg.state.slots.length} teams for playing.`;
-
-  if (agg.status !== "live") {
-    return <p className={ui.muted}>{agg.status === "complete" ? "This tournament is already closed." : "Start the tournament before closing it."}</p>;
-  }
 
   return (
     <div className={ui.card}>

@@ -1,5 +1,6 @@
 import type { AuditEntry, Outcome, TournamentAgg } from "../model";
-import { ConflictError, type Store, type StoredNotice, type TournamentSummary } from "./types";
+import { peopleOf, summarize, winsOf } from "../summary";
+import { ConflictError, type Person, type Store, type StoredNotice, type TournamentSummary, type Win } from "./types";
 
 /**
  * In-memory store for local development and tests. Data lives for the life
@@ -12,12 +13,26 @@ export class MemoryStore implements Store {
   private notices = new Map<string, StoredNotice[]>();
   private seq = 0;
 
-  constructor(seed: TournamentAgg[] = []) {
+  constructor(
+    seed: TournamentAgg[] = [],
+    private readonly hostKarma: Record<string, number> = {},
+  ) {
     for (const t of seed) this.tournaments.set(t.id, structuredClone(t));
   }
 
   async list(): Promise<TournamentSummary[]> {
-    return [...this.tournaments.values()].map((t) => ({ id: t.id, name: t.name, game: t.game, status: t.status, host: t.host }));
+    return [...this.tournaments.values()]
+      .filter((t) => t.status !== "draft")
+      .map((t) => summarize(t, this.hostKarma[t.host] ?? 70))
+      .sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+  }
+
+  async wins(): Promise<Win[]> {
+    return [...this.tournaments.values()].flatMap(winsOf);
+  }
+
+  async people(): Promise<Person[]> {
+    return peopleOf([...this.tournaments.values()]);
   }
 
   async get(id: string): Promise<TournamentAgg | null> {

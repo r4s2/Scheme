@@ -149,6 +149,15 @@ function done(agg: TournamentAgg, effects: Effects, message: string): Outcome {
 export function openCheckin(agg: TournamentAgg, ctx: Ctx): Outcome {
   requireHost(agg, ctx);
   if (agg.status !== "registration") throw new OperationError("Check-in can only open during registration.", "conflict");
+  const teams = Object.keys(agg.state.teams).length;
+  if (teams < agg.teamCount) {
+    throw new OperationError(
+      agg.signupType === "solo"
+        ? "Solo sign-ups need to be balanced into teams before check-in opens."
+        : `Registration isn't full yet: ${teams} of ${agg.teamCount} teams.`,
+      "conflict",
+    );
+  }
   const { next, effects } = begin(agg);
   next.status = "checkin";
   audit(effects, ctx, "checkin.open", "Opened check-in.");

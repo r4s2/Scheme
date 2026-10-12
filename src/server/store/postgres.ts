@@ -1,7 +1,8 @@
 import postgres from "postgres";
-import type { FormatId, GameId, MatchResult, Player, ResultSource, Team } from "@/engine";
-import type { AuditEntry, Closure, Dispute, ExtensionRequest, Outcome, Payout, Report, TournamentAgg, TournamentStatus } from "../model";
-import { ConflictError, type Store, type StoredNotice, type TournamentSummary } from "./types";
+import type { FormatId, MatchResult, Player, ResultSource, Team } from "@/engine";
+import type { AuditEntry, Closure, Dispute, ExtensionRequest, Outcome, Payout, Report, TournamentAgg } from "../model";
+import { sortPeople } from "../summary";
+import { ConflictError, type Person, type Store, type StoredNotice, type TournamentSummary, type Win } from "./types";
 
 type Sql = postgres.Sql;
 
@@ -28,6 +29,8 @@ export function connectionOptions(url: string): postgres.Options<Record<string, 
   };
 }
 
+const entryPlayer = (e: postgres.Row): Player => ({ handle: e.handle, score: e.rank_score, role: e.role, verified: e.rank_source, checkedIn: true, karma: e.player_karma });
+
 /**
  * Postgres-backed store for trusted server code. Connects with the database
  * connection string (DATABASE_URL), which bypasses row-level security, so
@@ -42,7 +45,9 @@ export class PostgresStore implements Store {
   constructor(private readonly sql: Sql) {}
 
   static fromUrl(url: string) {
-    return new PostgresStore(postgres(url, { ...connectionOptions(url), max: 5 }));
+    // SCHEME_SQL_LOG=1 prints every query, to spot pages that make too many round trips.
+    const debug = process.env.SCHEME_SQL_LOG === "1" ? (_c: number, q: string) => console.log(`[sql] ${q.replace(/\s+/g, " ").slice(0, 90)}`) : undefined;
+    return new PostgresStore(postgres(url, { ...connectionOptions(url), max: 10, debug }));
   }
 
   /** Resolves if the database answers within a few seconds; used to decide whether to fall back in development. */
@@ -60,12 +65,83 @@ export class PostgresStore implements Store {
   }
 
   async list(): Promise<TournamentSummary[]> {
-    const rows = await this.sql<{ id: string; name: string; game: GameId; status: TournamentStatus; host: string }[]>`
-      select t.id, t.name, t.game, t.status, p.handle as host
+    const rows = await this.sql`
+      select t.id, t.name, t.game, t.status, p.handle::text as host, p.host_karma, t.format, t.signup_type, t.region,
+             t.entry_fee_cents, t.team_count, cardinality(t.roles) as team_size, t.starts_at, t.rank_min_score, t.rank_max_score,
+             case when t.signup_type = 'solo'
+               then (select count(*) from tournament_players tp join tournament_teams tt on tt.id = tp.tournament_team_id where tt.tournament_id = t.id)
+                  + (select count(*) from tournament_entries e where e.tournament_id = t.id and e.status = 'registered')
+               else (select count(*) from tournament_teams tt where tt.tournament_id = t.id)
+             end::int as registered,
+             coalesce((select array_agg(tt.name order by tt.name) from final_places fp join tournament_teams tt on tt.id = fp.tournament_team_id
+                       where fp.tournament_id = t.id and fp.place = 1 and t.status = 'complete'), '{}')::text[] as winners,
+             coalesce((select array_agg(distinct pp.handle::text) from (
+                         select tp.profile_id from tournament_players tp join tournament_teams tt on tt.id = tp.tournament_team_id where tt.tournament_id = t.id
+                         union select e.profile_id from tournament_entries e where e.tournament_id = t.id and e.status in ('registered', 'sub')
+                       ) x join profiles pp on pp.id = x.profile_id), '{}')::text[] as players
       from tournaments t join profiles p on p.id = t.host_id
       where t.status <> 'draft'
       order by t.starts_at desc`;
-    return rows.map((r) => ({ ...r }));
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      game: r.game,
+      status: r.status,
+      host: r.host,
+      hostKarma: r.host_karma,
+      format: r.format,
+      signupType: r.signup_type,
+      region: r.region,
+      entryFeeCents: r.entry_fee_cents,
+      teamCount: r.team_count,
+      teamSize: r.team_size,
+      registered: r.registered,
+      startsAt: iso(r.starts_at),
+      rankMin: r.rank_min_score,
+      rankMax: r.rank_max_score,
+      winners: r.winners,
+      players: r.players,
+    }));
+  }
+
+  async wins(): Promise<Win[]> {
+    const rows = await this.sql`
+      select t.id, t.game, tt.name, t.closed_at,
+             coalesce(array_agg(p.handle::text order by p.handle) filter (where p.id is not null), '{}')::text[] as players
+      from final_places fp
+      join tournaments t on t.id = fp.tournament_id and t.status = 'complete'
+      join tournament_teams tt on tt.id = fp.tournament_team_id
+      left join tournament_players tp on tp.tournament_team_id = tt.id
+      left join profiles p on p.id = tp.profile_id
+      where fp.place = 1
+      group by t.id, t.game, tt.id, tt.name, t.closed_at`;
+    return rows.map((r) => ({ tournamentId: r.id, game: r.game, team: r.name, players: r.players, at: iso(r.closed_at ?? new Date()) }));
+  }
+
+  async people(): Promise<Person[]> {
+    const rows = await this.sql`
+      select handle, bool_or(is_host) as host,
+             coalesce(json_agg(distinct jsonb_build_object('name', team, 'captain', captain)) filter (where team is not null), '[]') as teams
+      from (
+        select p.handle::text as handle, true as is_host, null::text as team, false as captain
+        from tournaments t join profiles p on p.id = t.host_id
+        where t.status in ('registration', 'checkin', 'live')
+        union all
+        select p.handle::text, false, tt.name, tt.captain_id = p.id
+        from tournaments t
+        join tournament_teams tt on tt.tournament_id = t.id
+        join tournament_players tp on tp.tournament_team_id = tt.id
+        join profiles p on p.id = tp.profile_id
+        where t.status in ('registration', 'checkin', 'live')
+      ) x
+      group by handle`;
+    return sortPeople(
+      rows.map((r) => ({
+        handle: r.handle,
+        host: r.host,
+        teams: (r.teams as { name: string; captain: boolean }[]).filter((x, i, all) => all.findIndex((y) => y.name === x.name) === i),
+      })),
+    );
   }
 
   async get(id: string): Promise<TournamentAgg | null> {
@@ -76,12 +152,12 @@ export class PostgresStore implements Store {
       where t.id = ${id}`;
     if (!t) return null;
 
-    const [teamRows, results, reports, disputes, extensions, subs, payouts, places, prizes] = await Promise.all([
+    const [teamRows, results, reports, disputes, extensions, entries, payouts, places, prizes] = await Promise.all([
       sql`
         select tt.id, tt.name, cp.handle as captain,
                coalesce(json_agg(json_build_object(
                  'handle', p.handle, 'score', tp.rank_score, 'role', tp.role,
-                 'verified', tp.rank_source, 'checkedIn', tp.checked_in_at is not null
+                 'verified', tp.rank_source, 'checkedIn', tp.checked_in_at is not null, 'karma', p.player_karma
                ) order by tp.role, p.handle) filter (where tp.profile_id is not null), '[]') as players
         from tournament_teams tt
         join profiles cp on cp.id = tt.captain_id
@@ -100,9 +176,9 @@ export class PostgresStore implements Store {
         from extension_requests x join profiles p on p.id = x.requested_by
         where x.tournament_id = ${id} order by x.created_at`,
       sql`
-        select p.handle, e.rank_score, e.role, e.rank_source
+        select p.handle, e.rank_score, e.role, e.rank_source, e.status, p.player_karma
         from tournament_entries e join profiles p on p.id = e.profile_id
-        where e.tournament_id = ${id} and e.status = 'sub' order by p.handle`,
+        where e.tournament_id = ${id} and e.status in ('sub', 'registered') order by e.created_at, p.handle`,
       sql`
         select p.handle, po.tournament_team_id, po.place, po.amount_cents, po.release_at, po.status
         from payouts po join profiles p on p.id = po.profile_id
@@ -146,9 +222,14 @@ export class PostgresStore implements Store {
       withholdPct: t.withhold_pct,
       payoutSplit: t.payout_split,
       matchWindowHours: t.match_window_hours,
+      startsAt: iso(t.starts_at),
+      teamCount: t.team_count,
+      rankMin: t.rank_min_score,
+      rankMax: t.rank_max_score,
       state: { format: t.format as FormatId, bestOf: t.best_of, slots: t.slots, teams, results: resultMap },
       schedule: { waveDeadlines: (t.wave_deadlines as Date[]).map(iso), overrides },
-      subs: subs.map((s) => ({ handle: s.handle, score: s.rank_score, role: s.role, verified: s.rank_source, checkedIn: true })),
+      subs: entries.filter((e) => e.status === "sub").map(entryPlayer),
+      pool: entries.filter((e) => e.status === "registered").map(entryPlayer),
       reports: reports.map(
         (r): Report => ({ id: r.id, matchId: r.match_id, teamId: r.team_id, reporter: r.reporter, winner: r.winner_team_id, w: r.w, l: r.l, createdAt: iso(r.created_at) }),
       ),
@@ -212,8 +293,12 @@ export class PostgresStore implements Store {
       const pidOrNull = (h: string) => idOf.get(h.toLowerCase()) ?? null;
 
       // Rosters: captains and players (check-ins, subs, swaps).
-      for (const t of Object.values(a.state.teams)) {
-        await sql`update tournament_teams set captain_id = ${pid(t.captain)} where id = ${t.id} and tournament_id = ${a.id}`;
+      const captains = Object.values(a.state.teams).map((t) => [t.id, pid(t.captain)]);
+      if (captains.length) {
+        await sql`
+          update tournament_teams tt set captain_id = v.captain::uuid
+          from (values ${sql(captains)}) as v (id, captain)
+          where tt.id = v.id::uuid and tt.tournament_id = ${a.id}`;
       }
       // Keep each player's original check-in time and sub flag across saves.
       const existing = await sql`

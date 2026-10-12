@@ -21,6 +21,8 @@ export interface Player {
   role: string;
   verified: RankSource;
   checkedIn: boolean;
+  /** Player karma (0–100), when the store knows it. Display only. */
+  karma?: number;
 }
 
 export interface Team {

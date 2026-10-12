@@ -1,30 +1,25 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FORMAT_NAMES, GAMES } from "@/engine";
-import { BracketView } from "@/components/BracketView";
-import ui from "@/components/ui.module.css";
+import { FORMAT_NAMES, formatCents } from "@/engine";
+import { Board } from "@/components/bracket/Board";
+import { GameBadge } from "@/components/ui/bits";
 import { Checkin } from "@/components/tournament/Checkin";
 import { ClosePanel } from "@/components/tournament/ClosePanel";
 import { Desk } from "@/components/tournament/Desk";
 import { FinalResults } from "@/components/tournament/FinalResults";
 import { HostBracket } from "@/components/tournament/HostBracket";
 import { PlayerMatch } from "@/components/tournament/PlayerMatch";
-import { formatWhen } from "@/lib/format";
+import { Registration } from "@/components/tournament/Registration";
+import { WinnerPopup } from "@/components/tournament/WinnerPopup";
+import { dollars, formatWhen } from "@/lib/format";
+import { teamWins } from "@/server/data";
 import { runDueJobs, teamOf } from "@/server/operations";
 import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
-import { deskItems } from "@/server/views";
+import { deadlineOf, deskItems, statusOf } from "@/server/views";
 
 export const dynamic = "force-dynamic";
 
-const STATUS: Record<string, string> = {
-  draft: "Draft",
-  registration: "Registration open",
-  checkin: "Check-in open",
-  live: "Live",
-  complete: "Closed",
-  cancelled: "Cancelled",
-};
 
 export default async function TournamentPage({
   params,
@@ -56,17 +51,25 @@ export default async function TournamentPage({
   const isHost = actor === agg.host;
   const onTeam = actor ? teamOf(agg, actor) : null;
   const open = agg.status !== "complete" && agg.status !== "cancelled";
-  const desk = deskItems(agg, now);
+  const registering = agg.status === "registration";
+  const deskCount = registering ? 0 : deskItems(agg, now).count;
 
   const tabs: [string, string, number?][] = isHost
-    ? [
-        ["bracket", "Bracket"],
-        ["desk", "Match desk", desk.count],
-        ...(agg.status === "registration" || agg.status === "checkin" ? ([["checkin", "Check-in"]] as [string, string][]) : []),
-        ...(open ? ([["close", "Close"]] as [string, string][]) : []),
-        ["log", "Change log"],
-      ]
-    : onTeam
+    ? registering
+      ? [
+          ["bracket", "Registration"],
+          ["log", "Change log"],
+        ]
+      : [
+          ["bracket", "Bracket"],
+          ["desk", "Match desk", deskCount],
+          ...(agg.status === "checkin" ? ([["checkin", "Check-in"]] as [string, string][]) : []),
+          ...(open ? ([["close", "Close"]] as [string, string][]) : []),
+          ["log", "Change log"],
+        ]
+    : registering
+      ? [["bracket", "Registration"]]
+      : onTeam
       ? [
           ["match", "My match"],
           ["bracket", "Bracket"],
@@ -75,46 +78,86 @@ export default async function TournamentPage({
   const tab = tabs.some((t) => t[0] === sp.tab) ? sp.tab! : tabs[0][0];
   const log = tab === "log" ? await store.auditLog(id) : [];
 
+  const wins = await teamWins(agg.game);
+  const pill: Record<string, [string, string]> = {
+    draft: ["quiet", "Draft"],
+    registration: ["info", "Registration open"],
+    checkin: ["warn", "Check-in"],
+    live: ["bad", "Live"],
+    complete: ["gold", "Closed"],
+    cancelled: ["quiet", "Cancelled"],
+  };
+  const myTeam = onTeam ? agg.state.teams[onTeam] : null;
+  const won = !!onTeam && agg.status === "complete" && !!agg.closure?.places[0]?.includes(onTeam);
+  const myPrize = agg.payouts.filter((p) => p.handle === actor).reduce((n, p) => n + p.cents, 0);
+
   return (
-    <main className={ui.page}>
-      <div className={ui.crumbs}>
-        <Link href="/">Tournaments</Link> / {agg.name}
+    <main>
+      <div className="crumbs">
+        <Link href="/" style={{ color: "inherit" }}>
+          Browse
+        </Link>{" "}
+        / {agg.name}
       </div>
-      <div className={ui.head}>
+      <div className="thead">
         <div>
-          <h1 className={ui.title}>{agg.name}</h1>
-          <div className={ui.meta}>
-            <span className={ui.pill}>{GAMES[agg.game].name}</span>
-            <span className={`${ui.pill} ${agg.status === "live" ? ui.pillBad : agg.status === "complete" ? ui.pillGood : ui.pillInfo}`}>{STATUS[agg.status]}</span>
+          <h1>{agg.name}</h1>
+          <div className="metaline">
+            <GameBadge game={agg.game} />
+            <span className={`pill ${pill[agg.status][0]}`}>{pill[agg.status][1]}</span>
             <span>
               {FORMAT_NAMES[agg.state.format]} · Bo{agg.state.bestOf} · {agg.signupType === "solo" ? "Solo sign-up" : "Team sign-up"} · {agg.region}
+              {agg.entryFeeCents ? ` · ${dollars(agg.entryFeeCents)} entry` : " · Free"}
             </span>
             <span>· Hosted by {agg.host}</span>
           </div>
         </div>
-        <p className={`${ui.small} ${ui.muted}`}>
-          {actor ? (isHost ? "You're the host." : onTeam ? `You play for ${agg.state.teams[onTeam].name}.` : "You're following this event.") : "Read only."}
+        <p className="small muted" style={{ maxWidth: 320 }}>
+          {actor ? (isHost ? "You're the host." : myTeam ? `You play for ${myTeam.name}.` : "You're following this event.") : "Read only."}
         </p>
       </div>
 
-      {sp.msg && <div data-flash="ok" className={`${ui.flash} ${ui.flashOk}`} role="status">{sp.msg}</div>}
-      {sp.err && <div data-flash="err" className={`${ui.flash} ${ui.flashErr}`} role="alert">{sp.err}</div>}
+      {sp.msg && (
+        <div data-flash="ok" className="banner info" role="status">
+          <div className="btext">{sp.msg}</div>
+        </div>
+      )}
+      {sp.err && (
+        <div data-flash="err" className="banner bad" role="alert">
+          <div className="btext">{sp.err}</div>
+        </div>
+      )}
 
-      <nav className={ui.tabs} aria-label="Sections">
+      <nav className="tabs" aria-label="Sections">
         {tabs.map(([key, label, n]) => (
-          <Link key={key} href={`/t/${id}?tab=${key}`} className={`${ui.tab} ${key === tab ? ui.tabActive : ""}`} aria-current={key === tab ? "page" : undefined}>
+          <Link key={key} href={`/t/${id}?tab=${key}`} className="tab" aria-selected={key === tab} aria-current={key === tab ? "page" : undefined} style={{ textDecoration: "none" }}>
             {label}
-            {n ? <span className={ui.count}>{n}</span> : null}
+            {n ? <span className="count">{n}</span> : null}
           </Link>
         ))}
       </nav>
 
-      {tab === "bracket" && (
-        <>
-          <FinalResults agg={agg} />
-          {isHost ? <HostBracket agg={agg} now={now} editable={open} /> : <BracketView state={agg.state} game={agg.game} />}
-        </>
-      )}
+      {tab === "bracket" &&
+        (agg.status === "registration" ? (
+          <Registration agg={agg} now={now} isHost={isHost} wins={wins} />
+        ) : (
+          <>
+            <FinalResults agg={agg} />
+            {isHost ? (
+              <HostBracket agg={agg} now={now} editable={open} wins={wins} />
+            ) : (
+              <Board
+                state={agg.state}
+                game={agg.game}
+                status={(m) => statusOf(agg, m, now)}
+                deadline={(m) => deadlineOf(agg, m)}
+                mine={onTeam}
+                wins={wins}
+                phase={agg.status === "checkin" ? "checkin" : "play"}
+              />
+            )}
+          </>
+        ))}
       {tab === "desk" && <Desk agg={agg} now={now} />}
       {tab === "checkin" && <Checkin agg={agg} />}
       {tab === "close" && <ClosePanel agg={agg} />}
@@ -125,15 +168,15 @@ export default async function TournamentPage({
         </>
       )}
       {tab === "log" && (
-        <div className={ui.card}>
-          <p className={ui.lead}>Every change to the bracket, schedule and results since this server started, with who made it.</p>
+        <div className="card panel">
+          <p className="lead">Every change to the bracket, schedule and results, with who made it.</p>
           {log.length === 0 ? (
-            <p className={ui.muted}>No changes yet.</p>
+            <p className="muted">No changes yet.</p>
           ) : (
-            <ul className={ui.log}>
+            <ul className="log">
               {[...log].reverse().map((e, i) => (
                 <li key={i}>
-                  <span className={`${ui.small} ${ui.muted}`}>
+                  <span className="small muted">
                     {formatWhen(e.at)}
                     <br />
                     {e.actor}
@@ -145,6 +188,16 @@ export default async function TournamentPage({
             </ul>
           )}
         </div>
+      )}
+      {won && myTeam && (
+        <WinnerPopup
+          id={`${agg.id}:${actor}`}
+          team={myTeam.name}
+          tournament={agg.name}
+          prize={myPrize ? formatCents(myPrize) : agg.closure?.prize?.name ?? null}
+          message={agg.closure?.message ?? ""}
+          href={`/t/${id}?tab=match`}
+        />
       )}
     </main>
   );

@@ -2,8 +2,10 @@
 // have yet, then loads the sample data (unless --no-seed). Safe to run again;
 // it only does what's missing.
 //
-//   npm run db:setup              schema + sample data (development projects)
-//   npm run db:setup -- --no-seed schema only
+//   npm run db:setup               schema + sample data (development projects)
+//   npm run db:setup -- --no-seed  schema only
+//   npm run db:setup -- --reset    wipe all app data, then reload the sample data.
+//                                  Development projects only: it deletes everything.
 //
 // Applied changes are recorded in supabase_migrations.schema_migrations, the
 // same table the Supabase CLI uses, so `supabase db push` agrees with it.
@@ -15,6 +17,7 @@ import postgres from "postgres";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const seed = !process.argv.includes("--no-seed");
+const reset = process.argv.includes("--reset");
 try {
   process.loadEnvFile(join(root, ".env.local"));
 } catch {
@@ -98,6 +101,13 @@ async function main() {
     } catch (e) {
       throw Object.assign(e, { file });
     }
+  }
+
+  if (reset) {
+    const tables = await sql`select tablename from pg_tables where schemaname = 'public'`;
+    if (tables.length) await sql.unsafe(`truncate table ${tables.map((t) => `public."${t.tablename}"`).join(", ")} restart identity cascade`);
+    await sql`delete from auth.users where email like '%@example.test'`;
+    console.log(`  - removed all app data (${tables.length} tables emptied)`);
   }
 
   if (seed) {

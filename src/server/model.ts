@@ -77,10 +77,23 @@ export interface TournamentAgg {
   withholdPct: number;
   payoutSplit: number[];
   matchWindowHours: number;
+  /** When play starts (ISO). */
+  startsAt: string;
+  /** Teams the event is built for (4, 8, 16 or 32). */
+  teamCount: number;
+  /** Allowed rank range, as ladder scores. */
+  rankMin: number;
+  rankMax: number;
   state: TournamentState;
   schedule: Schedule;
   /** Free agents available to replace no-shows. */
   subs: Player[];
+  /**
+   * Solo sign-ups not yet placed on a team (solo events during registration).
+   * Read-only for now: the balancer that turns them into teams comes with
+   * registration.
+   */
+  pool: Player[];
   reports: Report[];
   disputes: Dispute[];
   extensions: ExtensionRequest[];

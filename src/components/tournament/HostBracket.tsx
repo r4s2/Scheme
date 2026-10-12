@@ -1,5 +1,6 @@
 import { canReopen, canTransform, FORMAT_NAMES, lockedSlots, resultOf, scoreOptions, type FormatId } from "@/engine";
-import { BracketView } from "@/components/BracketView";
+import { Board } from "@/components/bracket/Board";
+import { SeedIcon, ShuffleIcon, TransformIcon } from "@/components/ui/icons";
 import { formatWhen, statusText } from "@/lib/format";
 import type { TournamentAgg } from "@/server/model";
 import { bracketOf, deadlineOf, statusOf } from "@/server/views";
@@ -8,7 +9,7 @@ import { Hidden, Op } from "./Op";
 
 const FORMATS = Object.keys(FORMAT_NAMES) as FormatId[];
 
-export function HostBracket({ agg, now, editable }: { agg: TournamentAgg; now: Date; editable: boolean }) {
+export function HostBracket({ agg, now, editable, wins }: { agg: TournamentAgg; now: Date; editable: boolean; wins: Record<string, number> }) {
   const b = bracketOf(agg);
   const tid = agg.id;
   const tab = "bracket";
@@ -22,55 +23,68 @@ export function HostBracket({ agg, now, editable }: { agg: TournamentAgg; now: D
   return (
     <>
       {editable && (
-        <div className={ui.card}>
-          <h3>Edit the bracket</h3>
-          <p className={ui.lead}>
-            Teams with a confirmed result are locked{locked.size ? ` (${locked.size} right now)` : ""}. Every change is logged and the affected teams are notified.
-          </p>
-          <div className={ui.row}>
-            <Op tid={tid} op="randomize" tab={tab}>
-              <button className={ui.btn}>Randomize</button>
-            </Op>
-            <Op tid={tid} op="seed" tab={tab}>
-              <button className={ui.btn}>Auto-seed by rank</button>
-            </Op>
-            <Op tid={tid} op="transform" tab={tab}>
-              <select name="format" defaultValue={FORMATS.find((f) => f !== agg.state.format)} disabled={!tf} aria-label="New format">
-                {FORMATS.filter((f) => f !== agg.state.format).map((f) => (
-                  <option key={f} value={f}>
-                    {FORMAT_NAMES[f]}
+        <div className="toolbar">
+          <Op tid={tid} op="randomize" tab={tab}>
+            <button className="btn sm" title="Shuffle every unlocked team into a new slot">
+              <ShuffleIcon />
+              Randomize
+            </button>
+          </Op>
+          <Op tid={tid} op="seed" tab={tab}>
+            <button className="btn sm" title="Seed by average verified rank: 1 vs last, 2 vs second-last">
+              <SeedIcon />
+              Auto-seed by rank
+            </button>
+          </Op>
+          <Op tid={tid} op="transform" tab={tab}>
+            <select name="format" defaultValue={FORMATS.find((f) => f !== agg.state.format)} disabled={!tf} aria-label="New format" style={{ padding: "5px 8px", fontSize: 13 }}>
+              {FORMATS.filter((f) => f !== agg.state.format).map((f) => (
+                <option key={f} value={f}>
+                  {FORMAT_NAMES[f]}
+                </option>
+              ))}
+            </select>
+            <button className="btn sm" disabled={!tf} title={tf ? "Change the format, keeping first-round results" : "Locked once results go past round one"}>
+              <TransformIcon />
+              Transform
+            </button>
+          </Op>
+          {agg.state.format !== "rr" && (
+            <Op tid={tid} op="swap" tab={tab}>
+              <select name="a" aria-label="First team" style={{ padding: "5px 8px", fontSize: 13, maxWidth: 160 }}>
+                {agg.state.slots.map((s, i) => (
+                  <option key={s} value={i} disabled={locked.has(i)}>
+                    {name(s)}
                   </option>
                 ))}
               </select>
-              <button className={ui.btn} disabled={!tf} title={tf ? undefined : "Locked once results go past round one"}>
-                Transform
-              </button>
+              <span className={ui.muted}>⇄</span>
+              <select name="b" defaultValue={1} aria-label="Second team" style={{ padding: "5px 8px", fontSize: 13, maxWidth: 160 }}>
+                {agg.state.slots.map((s, i) => (
+                  <option key={s} value={i} disabled={locked.has(i)}>
+                    {name(s)}
+                  </option>
+                ))}
+              </select>
+              <button className="btn sm">Swap</button>
             </Op>
-            {agg.state.format !== "rr" && (
-              <Op tid={tid} op="swap" tab={tab}>
-                <select name="a" aria-label="First team">
-                  {agg.state.slots.map((s, i) => (
-                    <option key={s} value={i} disabled={locked.has(i)}>
-                      {name(s)}
-                    </option>
-                  ))}
-                </select>
-                <span className={ui.muted}>⇄</span>
-                <select name="b" defaultValue={1} aria-label="Second team">
-                  {agg.state.slots.map((s, i) => (
-                    <option key={s} value={i} disabled={locked.has(i)}>
-                      {name(s)}
-                    </option>
-                  ))}
-                </select>
-                <button className={ui.btn}>Swap</button>
-              </Op>
-            )}
-          </div>
+          )}
+          <span className="hint">
+            {agg.state.format !== "rr" ? "Drag a first-round team onto another to swap them. " : ""}
+            {locked.size ? `${locked.size} team${locked.size === 1 ? " is" : "s are"} locked by results. ` : ""}Every change is logged.
+          </span>
         </div>
       )}
 
-      <BracketView state={agg.state} game={agg.game} />
+      <Board
+        state={agg.state}
+        game={agg.game}
+        status={(m) => statusOf(agg, m, now)}
+        deadline={(m) => deadlineOf(agg, m)}
+        edit={editable ? { tid, tab, results: agg.status === "live" } : undefined}
+        wins={wins}
+        phase={agg.status === "checkin" ? "checkin" : "play"}
+      />
 
       {editable && agg.status === "live" && (
         <div className={ui.card} style={{ marginTop: 16 }}>
@@ -90,7 +104,7 @@ export function HostBracket({ agg, now, editable }: { agg: TournamentAgg; now: D
                 {open.map((m) => {
                   const d = deadlineOf(agg, m);
                   return (
-                    <tr key={m.id}>
+                    <tr key={m.id} id={`result-${m.id}`}>
                       <td>
                         <b>{m.id}</b> · {name(m.a)} vs {name(m.b)}
                       </td>

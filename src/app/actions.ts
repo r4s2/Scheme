@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getStore } from "@/server/store";
@@ -24,8 +25,9 @@ export async function setActor(formData: FormData) {
   redirect(back);
 }
 
+/** Mark every notification read and refresh whatever page you're on. */
 export async function markNotificationsRead() {
   const actor = await currentActor();
   if (actor) await getStore().markAllRead(actor);
-  redirect("/notifications");
+  revalidatePath("/", "layout");
 }

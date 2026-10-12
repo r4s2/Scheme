@@ -1,12 +1,47 @@
-import type { GameId } from "@/engine";
+import type { FormatId, GameId } from "@/engine";
 import type { AuditEntry, Effects, Outcome, TournamentAgg, TournamentStatus } from "../model";
 
+/** What the tournament library and lists need, without loading whole tournaments. */
 export interface TournamentSummary {
   id: string;
   name: string;
   game: GameId;
   status: TournamentStatus;
   host: string;
+  hostKarma: number;
+  format: FormatId;
+  signupType: "team" | "solo";
+  region: string;
+  entryFeeCents: number;
+  teamCount: number;
+  /** Seats per team. */
+  teamSize: number;
+  /** Teams registered (team sign-up) or players registered (solo sign-up). */
+  registered: number;
+  startsAt: string;
+  rankMin: number;
+  rankMax: number;
+  /** Names of first-place teams once the event is closed. */
+  winners: string[];
+  /** Everyone playing in it (team players, subs and solo sign-ups), for "My tournaments". */
+  players: string[];
+}
+
+/** One first place: the raw material for leaderboards. */
+export interface Win {
+  tournamentId: string;
+  game: GameId;
+  team: string;
+  players: string[];
+  at: string;
+}
+
+/** Someone who appears in a tournament, for the development "Acting as" switcher. */
+export interface Person {
+  handle: string;
+  host: boolean;
+  /** Team names they play for, captain first. */
+  teams: { name: string; captain: boolean }[];
 }
 
 export interface StoredNotice {
@@ -19,7 +54,11 @@ export interface StoredNotice {
 }
 
 export interface Store {
+  /** Every published tournament (not drafts), newest start first. */
   list(): Promise<TournamentSummary[]>;
+  /** First places from closed tournaments. */
+  wins(): Promise<Win[]>;
+  people(): Promise<Person[]>;
   get(id: string): Promise<TournamentAgg | null>;
   /**
    * Save an operation's result. `prev` is the copy the operation started

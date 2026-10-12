@@ -1,61 +1,52 @@
 import Link from "next/link";
-import { setActor } from "@/app/actions";
-import { getStore, storeMode } from "@/server/store";
+import { formatWhen } from "@/lib/format";
+import { notificationsFor, people } from "@/server/data";
+import { storeMode } from "@/server/store";
 import { actingAsEnabled, currentActor } from "@/server/session";
-import ui from "./ui.module.css";
-
-/** Everyone who appears in a tournament, for the development "acting as" switcher. */
-async function knownPeople(): Promise<{ handle: string; label: string }[]> {
-  const store = getStore();
-  const out = new Map<string, string>();
-  for (const s of await store.list()) {
-    const t = await store.get(s.id);
-    if (!t) continue;
-    if (!out.has(t.host)) out.set(t.host, `${t.host} · host`);
-    for (const team of Object.values(t.state.teams)) {
-      for (const p of team.players) if (!out.has(p.handle)) out.set(p.handle, `${p.handle} · ${team.name}${p.handle === team.captain ? " captain" : ""}`);
-    }
-  }
-  return [...out].map(([handle, label]) => ({ handle, label })).sort((a, b) => Number(b.label.includes("host")) - Number(a.label.includes("host")) || Number(b.label.includes("captain")) - Number(a.label.includes("captain")) || a.handle.localeCompare(b.handle));
-}
+import { ActingAs } from "./ActingAs";
+import { NavLinks } from "./NavLinks";
+import { NotificationsMenu } from "./NotificationsMenu";
 
 export async function Header() {
   const actor = await currentActor();
-  const unread = actor ? (await getStore().notifications(actor)).filter((n) => !n.read).length : 0;
-  const people = actingAsEnabled() ? await knownPeople() : [];
+  const [notices, everyone] = await Promise.all([actor ? notificationsFor(actor) : [], actingAsEnabled() ? people() : []]);
   const offline = storeMode() === "offline";
+  const options = everyone.map((p) => ({
+    handle: p.handle,
+    label: p.host ? `${p.handle} · host` : p.teams[0] ? `${p.handle} · ${p.teams[0].name}${p.teams[0].captain ? " captain" : ""}` : p.handle,
+  }));
+  if (actor && !options.some((o) => o.handle === actor)) options.unshift({ handle: actor, label: actor });
+
   return (
-    <header className={ui.topbar}>
+    <header className="topbar">
       {offline && (
-        <p className={ui.offline} role="status">
+        <p className="offline-bar" role="status">
           Can&rsquo;t reach the database from this network, so you&rsquo;re seeing demo data. Scheme reconnects on its own when it can.
         </p>
       )}
-      <div className={ui.topbarInner}>
-        <Link href="/" className={ui.brand}>
+      <div className="topbar-inner">
+        <Link href="/" className="logo" aria-label="Scheme home">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 5h5v5H3zM3 14h5v5H3z" stroke="currentColor" strokeWidth="2" />
+            <path d="M8 7.5h3.5v9H8M11.5 12H16" stroke="currentColor" strokeWidth="2" />
+            <path d="M16 9.5h5v5h-5z" fill="var(--accent)" stroke="var(--accent)" strokeWidth="2" />
+          </svg>
           scheme
         </Link>
-        <nav className={ui.nav} aria-label="Main">
-          <Link href="/">Tournaments</Link>
-          <Link href="/demo">Engine demo</Link>
-          {actor && (
-            <Link href="/notifications">
-              Notifications{unread ? <span className={ui.count}>{unread}</span> : null}
-            </Link>
-          )}
-        </nav>
-        {actingAsEnabled() && (
-          <form action={setActor} className={ui.devbar}>
-            <label htmlFor="acting-as">Acting as (dev only)</label>
-            <select id="acting-as" name="handle" defaultValue={actor ?? undefined}>
-              {people.map((p) => (
-                <option key={p.handle} value={p.handle}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <button className={ui.btn}>Switch</button>
-          </form>
+        <NavLinks />
+        {actingAsEnabled() && <ActingAs actor={actor} people={options} />}
+        {actor && (
+          <NotificationsMenu
+            notices={notices.slice(0, 20).map((n) => ({ id: n.id, body: n.body, link: n.link, when: formatWhen(n.createdAt), read: n.read }))}
+          />
+        )}
+        {actor && (
+          <Link href="/mine" className="me" style={{ color: "inherit", textDecoration: "none" }}>
+            <span className="avatar" aria-hidden="true">
+              {actor[0]?.toUpperCase()}
+            </span>
+            <span className="me-name">{actor}</span>
+          </Link>
         )}
       </div>
     </header>

@@ -1,5 +1,5 @@
 import type { AuditEntry, Outcome, TournamentAgg } from "../model";
-import type { Store, StoredNotice, TournamentSummary } from "./types";
+import type { Person, Store, StoredNotice, TournamentSummary, Win } from "./types";
 
 /** Error codes that mean "couldn't reach the database", as opposed to a query the database rejected. */
 const CONNECTION_CODES = new Set([
@@ -118,6 +118,14 @@ export class FallbackStore implements Store {
 
   list(): Promise<TournamentSummary[]> {
     return this.read((s) => s.list());
+  }
+
+  wins(): Promise<Win[]> {
+    return this.read((s) => s.wins());
+  }
+
+  people(): Promise<Person[]> {
+    return this.read((s) => s.people());
   }
 
   get(id: string): Promise<TournamentAgg | null> {

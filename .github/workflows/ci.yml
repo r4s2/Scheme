@@ -44,4 +44,9 @@ jobs:
       - run: npm ci
       - name: Apply schema and seed
         run: cat supabase/tests/supabase-stubs.sql supabase/migrations/*.sql supabase/seed.sql | psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q
-      - run: npx vitest run src/server/__tests__/postgres.integration.test.ts
+      - name: Seed matches demo mode
+        run: npx vitest run src/server/__tests__/seed-parity.integration.test.ts
+      - name: Store against Postgres
+        run: npx vitest run src/server/__tests__/postgres.integration.test.ts
+      - name: Seed file is up to date
+        run: npm run seed:generate && git diff --exit-code supabase/seed.sql

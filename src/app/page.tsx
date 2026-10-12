@@ -1,53 +1,48 @@
-import Link from "next/link";
-import { GAMES } from "@/engine";
-import ui from "@/components/ui.module.css";
-import { getStore, storeMode } from "@/server/store";
-import { currentActor } from "@/server/session";
+import { GAMES, type GameId } from "@/engine";
+import { toCards } from "@/components/home/cards";
+import { Library } from "@/components/home/Library";
+import { Ticker } from "@/components/leaderboard/Ticker";
+import { leaderboards, listTournaments } from "@/server/data";
+import { storeMode } from "@/server/store";
 
 export const dynamic = "force-dynamic";
 
-const STATUS: Record<string, string> = {
-  draft: "Draft",
-  registration: "Registration open",
-  checkin: "Check-in open",
-  live: "Live",
-  complete: "Closed",
-  cancelled: "Cancelled",
-};
-
 export default async function Home() {
-  const [list, actor] = await Promise.all([getStore().list(), currentActor()]);
+  const [list, boards] = await Promise.all([listTournaments(), leaderboards()]);
+  const now = new Date();
+  const mode = storeMode();
+  const open = list.filter((t) => t.status === "registration" || t.status === "checkin" || t.status === "live");
+  const order = (st: string) => (st === "live" ? 0 : st === "checkin" ? 1 : 2);
+  open.sort((a, b) => order(a.status) - order(b.status) || a.startsAt.localeCompare(b.startsAt));
+  const cards = toCards(open, now);
+  const missing = (Object.keys(GAMES) as GameId[]).filter((g) => !boards.some((b) => b.key === g)).map((g) => GAMES[g].name);
+
   return (
-    <main className={ui.page}>
-      <h1 className={ui.title}>Tournaments</h1>
-      <p className={ui.lead} style={{ marginTop: 8 }}>
-        {storeMode() === "database"
-          ? "Live data from the database."
-          : "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."}
-      </p>
-      {list.length === 0 && (
-        <div className={ui.card} style={{ marginTop: 16 }}>
-          <h3 style={{ fontSize: 18 }}>No tournaments yet</h3>
-          <p className={ui.muted} style={{ marginTop: 6 }}>
-            The database is connected but empty. To load the sample tournament, run <code>npm run db:setup</code> in the project folder, then reload this page.
-          </p>
+    <main>
+      {list.length === 0 && mode === "database" && (
+        <div className="banner info">
+          <div className="btext">
+            <b>The database is connected but empty.</b>
+            To load the sample tournaments, run <code>npm run db:setup</code> in the project folder, then reload this page.
+          </div>
         </div>
       )}
-      <div className={ui.grid2}>
-        {list.map((t) => (
-          <Link key={t.id} href={`/t/${t.id}`} className={ui.card} style={{ textDecoration: "none", color: "inherit" }}>
-            <div className={ui.row} style={{ justifyContent: "space-between" }}>
-              <span className={ui.pill}>{GAMES[t.game].name}</span>
-              <span className={`${ui.pill} ${t.status === "live" ? ui.pillBad : t.status === "complete" ? ui.pillGood : ui.pillInfo}`}>{STATUS[t.status]}</span>
-            </div>
-            <h3 style={{ marginTop: 10, fontSize: 18 }}>{t.name}</h3>
-            <p className={`${ui.small} ${ui.muted}`}>
-              Hosted by {t.host}
-              {actor === t.host ? " (you)" : ""}
+      <Library
+        cards={cards}
+        hero={
+          <>
+            <h1>Find a bracket for tonight.</h1>
+            <p className="sub">
+              Every player here has a verified rank, every host has a karma score, and every entry fee is handled by Scheme. Join with your team or sign up solo and get
+              placed on a balanced one.
             </p>
-          </Link>
-        ))}
-      </div>
+          </>
+        }
+        aside={<Ticker boards={boards} missing={missing} />}
+      />
+      <p className="tiny muted" style={{ marginTop: 24 }}>
+        {mode === "database" ? "Live data from the database." : "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."}
+      </p>
     </main>
   );
 }
