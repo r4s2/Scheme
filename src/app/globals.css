@@ -494,3 +494,16 @@ a.logo { color: var(--ink); text-decoration: none; }
   .devbar { padding-left: 4px; }
   .devbar select { max-width: 124px; }
 }
+.toast.err { background: var(--bad); color: #fff; }
+form[data-pending] button { opacity: 0.6; pointer-events: none; }
+
+/* Bracket board interactions */
+.team.movable { cursor: grab; touch-action: none; user-select: none; }
+.team.movable:active { cursor: grabbing; }
+.team.ghost { background: var(--surface); border-color: var(--accent); box-shadow: var(--shadow); transform: scale(1.04) rotate(-1deg); cursor: grabbing; }
+.board.is-dragging .team.movable:not(.dragging):hover { border-color: var(--accent); border-style: dashed; }
+.board.saving .team.movable { cursor: progress; }
+.match .result-form { justify-content: flex-start; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; }
+.match .result-form .seg { width: 100%; display: flex; }
+.match .result-form .seg button { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 4px 6px; font-size: 12px; }
+.seg button[aria-checked="true"] { background: var(--ink); color: var(--bg); }

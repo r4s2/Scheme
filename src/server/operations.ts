@@ -3,6 +3,7 @@ import {
   autoConfirmAt,
   buildBracket,
   canTransform,
+  lockedSlots,
   EngineError,
   evaluateReports,
   extendDeadline,
@@ -412,6 +413,41 @@ export function transformBracket(agg: TournamentAgg, ctx: Ctx, format: FormatId)
   if (format === agg.state.format) throw new OperationError(`This tournament is already ${FORMAT_NAMES[format].toLowerCase()}.`, "conflict");
   if (!canTransform(agg.state)) throw new OperationError("Results exist past round one, so the format is locked.", "conflict");
   return slotsChanged(agg, ctx, agg.state.slots, format, "bracket.transform", `Changed the format to ${FORMAT_NAMES[format].toLowerCase()}.`);
+}
+
+export type ArrangeKind = "swap" | "randomize" | "seed" | "transform" | "undo";
+
+/**
+ * Put the bracket into an arrangement the host made on the board: any
+ * reordering of the same teams, optionally in a new format. Teams locked by
+ * a result must stay where they are, and the format can only change while
+ * canTransform allows it. The board computes the arrangement with the same
+ * engine functions (swap, randomize, seed, transform), so it can show the
+ * move before the save finishes.
+ */
+export function arrangeBracket(agg: TournamentAgg, ctx: Ctx, slots: string[], format: FormatId, kind: ArrangeKind): Outcome {
+  requireHost(agg, ctx);
+  requireOpen(agg);
+  if (agg.status === "registration") throw new OperationError("The bracket is drawn when check-in opens.", "conflict");
+  const current = agg.state.slots;
+  if (slots.length !== current.length || [...slots].sort().join() !== [...current].sort().join()) {
+    throw new OperationError("That arrangement doesn't match this tournament's teams. Reload and try again.", "conflict");
+  }
+  if (format !== agg.state.format && !canTransform(agg.state)) throw new OperationError("Results exist past round one, so the format is locked.", "conflict");
+  const locked = lockedSlots(agg.state, current, agg.state.format);
+  for (const i of locked) {
+    if (slots[i] !== current[i]) throw new OperationError(`${teamName(agg, current[i])} has a confirmed result, so it is locked in place.`, "conflict");
+  }
+  const moved = slots.map((s, i) => (s !== current[i] ? i : -1)).filter((i) => i >= 0);
+  if (!moved.length && format === agg.state.format) throw new OperationError("Nothing changed.", "conflict");
+  let summary: string;
+  if (kind === "swap" && moved.length === 2) summary = `Swapped ${teamName(agg, current[moved[0]])} and ${teamName(agg, current[moved[1]])}.`;
+  else if (kind === "randomize") summary = "Randomized every team not locked by a result.";
+  else if (kind === "seed") summary = "Seeded open slots by verified average rank.";
+  else if (format !== agg.state.format) summary = `Changed the format to ${FORMAT_NAMES[format].toLowerCase()}.`;
+  else if (kind === "undo") summary = "Undid the last bracket change.";
+  else summary = `Moved ${moved.length} team${moved.length === 1 ? "" : "s"}.`;
+  return slotsChanged(agg, ctx, slots, format, `bracket.${kind}`, summary);
 }
 
 /* ------------------------------------------------------------------ */

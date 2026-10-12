@@ -1,7 +1,7 @@
 import type { GameId, TournamentState } from "@/engine";
-import { Board } from "./bracket/Board";
+import { BracketBoard } from "./bracket/BracketBoard";
 
-/** Read-only bracket for any engine state (used by /demo). Tournament pages use Board directly. */
+/** Read-only bracket for any engine state (used by /demo). Tournament pages use BracketBoard with boardProps. */
 export function BracketView({ state, game }: { state: TournamentState; game: GameId }) {
-  return <Board state={state} game={game} />;
+  return <BracketBoard state={state} game={game} />;
 }

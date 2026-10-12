@@ -1,6 +1,6 @@
 import { GAMES, rankShortName } from "@/engine";
-import { BoardClient } from "@/components/bracket/BoardClient";
-import { hoverTeam } from "@/components/bracket/Board";
+import { hoverTeam } from "@/components/bracket/hover";
+import { HoverLayer } from "@/components/bracket/HoverLayer";
 import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 import { startText } from "@/lib/format";
 import type { TournamentAgg } from "@/server/model";
@@ -78,7 +78,7 @@ export function Registration({ agg, now, isHost, wins }: { agg: TournamentAgg; n
           </div>
         </div>
       ) : (
-        <BoardClient teams={hover}>
+        <HoverLayer teams={hover}>
           <div className="reg-grid">
             {teams.map((t, i) => (
               <div key={t.id} className="card" style={{ padding: "10px 12px" }}>
@@ -102,7 +102,7 @@ export function Registration({ agg, now, isHost, wins }: { agg: TournamentAgg; n
               </div>
             ))}
           </div>
-        </BoardClient>
+        </HoverLayer>
       )}
     </>
   );

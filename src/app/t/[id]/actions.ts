@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { notFound, redirect } from "next/navigation";
-import type { CloseMethod, FormatId } from "@/engine";
+import type { CloseMethod, FormatId, TournamentState } from "@/engine";
 import { OperationError, type Ctx, type Outcome, type TournamentAgg } from "@/server/model";
 import * as op from "@/server/operations";
 import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
@@ -68,6 +67,20 @@ function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData): Out
       return op.randomizeBracket(agg, ctx, Date.now());
     case "seed":
       return op.seedBracket(agg, ctx);
+    case "arrange": {
+      const f = field(fd, "format") as FormatId;
+      if (!FORMATS.includes(f)) throw new OperationError("Unknown format.");
+      const kind = field(fd, "kind") as op.ArrangeKind;
+      if (!["swap", "randomize", "seed", "transform", "undo"].includes(kind)) throw new OperationError("Unknown change.");
+      let slots: unknown;
+      try {
+        slots = JSON.parse(field(fd, "slots"));
+      } catch {
+        throw new OperationError("That arrangement couldn't be read.");
+      }
+      if (!Array.isArray(slots) || !slots.every((x) => typeof x === "string")) throw new OperationError("That arrangement couldn't be read.");
+      return op.arrangeBracket(agg, ctx, slots, f, kind);
+    }
     case "transform": {
       const f = field(fd, "format") as FormatId;
       if (!FORMATS.includes(f)) throw new OperationError("Unknown format.");
@@ -94,34 +107,45 @@ function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData): Out
   }
 }
 
-export async function runOperation(fd: FormData) {
+export interface OpResult {
+  ok: boolean;
+  message: string;
+  /** Distinguishes two identical results, so the page shows each one. */
+  at: number;
+  /** The tournament after the operation (or as it stands, if it was refused), for the bracket board. */
+  state?: TournamentState;
+  version?: number;
+}
+
+/**
+ * Run one tournament operation from a form or the bracket board and report
+ * back, without navigating: the page refreshes its data in place and shows
+ * the message as a notice. If the form sends the version it was showing and
+ * someone else saved since, nothing changes and the latest state comes back.
+ */
+export async function runOp(_prev: OpResult | null, fd: FormData): Promise<OpResult> {
   const id = String(fd.get("tournamentId") ?? "");
   const name = String(fd.get("op") ?? "");
-  const tab = String(fd.get("tab") ?? "");
   const actor = await currentActor();
   const store = getStore();
   const agg = await store.get(id);
-  if (!agg) notFound();
-
-  let ok = true;
-  let message: string;
-  if (!actor) {
-    ok = false;
-    message = "Sign in to do that.";
-  } else {
-    try {
-      const out = dispatch(name, agg, { now: new Date(), actor, newId: () => crypto.randomUUID() }, fd);
-      await store.commit(agg, out);
-      message = out.message;
-    } catch (e) {
-      if (!(e instanceof OperationError) && !(e instanceof ConflictError) && !(e instanceof DatabaseUnavailableError)) throw e;
-      ok = false;
-      message = e.message;
-    }
+  const at = Date.now();
+  if (!agg) return { ok: false, message: "That tournament no longer exists.", at };
+  const latest = { state: agg.state, version: agg.version };
+  if (!actor) return { ok: false, message: "Sign in to do that.", at, ...latest };
+  const seen = fd.get("version");
+  if (seen !== null && Number(seen) !== agg.version) {
+    return { ok: false, message: "Someone else changed this tournament a moment ago. You're now seeing the latest.", at, ...latest };
   }
-  revalidatePath(`/t/${id}`);
-  const qs = new URLSearchParams();
-  if (tab) qs.set("tab", tab);
-  qs.set(ok ? "msg" : "err", message);
-  redirect(`/t/${id}?${qs.toString()}`);
+  try {
+    const out = dispatch(name, agg, { now: new Date(), actor, newId: () => crypto.randomUUID() }, fd);
+    const saved = await store.commit(agg, out);
+    revalidatePath(`/t/${id}`);
+    return { ok: true, message: out.message, at, state: saved.state, version: saved.version };
+  } catch (e) {
+    if (!(e instanceof OperationError) && !(e instanceof ConflictError) && !(e instanceof DatabaseUnavailableError)) throw e;
+    const fresh = e instanceof ConflictError ? await store.get(id) : null;
+    revalidatePath(`/t/${id}`);
+    return { ok: false, message: e.message, at, ...(fresh ? { state: fresh.state, version: fresh.version } : latest) };
+  }
 }

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FORMAT_NAMES, formatCents } from "@/engine";
-import { Board } from "@/components/bracket/Board";
+import { BracketBoard } from "@/components/bracket/BracketBoard";
+import { boardProps } from "@/components/bracket/props";
 import { GameBadge } from "@/components/ui/bits";
 import { Checkin } from "@/components/tournament/Checkin";
 import { ClosePanel } from "@/components/tournament/ClosePanel";
@@ -16,7 +17,7 @@ import { teamWins } from "@/server/data";
 import { runDueJobs, teamOf } from "@/server/operations";
 import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
-import { deadlineOf, deskItems, statusOf } from "@/server/views";
+import { deskItems } from "@/server/views";
 
 export const dynamic = "force-dynamic";
 
@@ -146,15 +147,7 @@ export default async function TournamentPage({
             {isHost ? (
               <HostBracket agg={agg} now={now} editable={open} wins={wins} />
             ) : (
-              <Board
-                state={agg.state}
-                game={agg.game}
-                status={(m) => statusOf(agg, m, now)}
-                deadline={(m) => deadlineOf(agg, m)}
-                mine={onTeam}
-                wins={wins}
-                phase={agg.status === "checkin" ? "checkin" : "play"}
-              />
+              <BracketBoard {...boardProps(agg, now, { mine: onTeam, wins })} />
             )}
           </>
         ))}
