@@ -73,7 +73,9 @@ function notify(effects: Effects, agg: TournamentAgg, recipients: Iterable<strin
 const teamName = (agg: TournamentAgg, id: string | null) => (id ? agg.state.teams[id]?.name ?? id : "TBD");
 const captainsOf = (agg: TournamentAgg, ...teamIds: (string | null)[]) =>
   teamIds.filter((t): t is string => !!t).map((t) => agg.state.teams[t]?.captain ?? "");
-const everyone = (agg: TournamentAgg) => Object.values(agg.state.teams).flatMap((t) => t.players.map((p) => p.handle));
+/** Everyone on a team, subs included. */
+const everyone = (agg: TournamentAgg) => Object.values(agg.state.teams).flatMap((t) => [...t.players, ...(t.bench ?? [])].map((p) => p.handle));
+const starters = (agg: TournamentAgg) => Object.values(agg.state.teams).flatMap((t) => t.players.map((p) => p.handle));
 
 function requireHost(agg: TournamentAgg, ctx: Ctx) {
   if (ctx.actor !== agg.host) throw new OperationError("Only the host can do that.", "forbidden");
@@ -101,7 +103,12 @@ export function captainOf(agg: TournamentAgg, handle: string): string | null {
   return Object.values(agg.state.teams).find((t) => t.captain === handle)?.id ?? null;
 }
 
-/** The team a handle plays on, if any. */
+/** The team a handle is registered with, as a starter or a sub. */
+export function rosterTeamOf(agg: TournamentAgg, handle: string): string | null {
+  return Object.values(agg.state.teams).find((t) => [...t.players, ...(t.bench ?? [])].some((p) => p.handle === handle))?.id ?? null;
+}
+
+/** The team a handle plays on (as a starter), if any. */
 export function teamOf(agg: TournamentAgg, handle: string): string | null {
   return Object.values(agg.state.teams).find((t) => t.players.some((p) => p.handle === handle))?.id ?? null;
 }
@@ -165,7 +172,7 @@ export function openCheckin(agg: TournamentAgg, ctx: Ctx): Outcome {
   const { next, effects } = begin(agg);
   next.status = "checkin";
   audit(effects, ctx, "checkin.open", "Opened check-in.");
-  notify(effects, next, everyone(next), "checkin", `Check-in is open for ${next.name}. Check in from your match page.`);
+  notify(effects, next, starters(next), "checkin", `Check-in is open for ${next.name}. Check in from your match page.`);
   return done(next, effects, "Check-in is open. Players were notified.");
 }
 

@@ -35,7 +35,7 @@ export function invite(r: Roster, actor: string, profile: Profile | undefined, h
   if (!profile) throw new OperationError(`There's no player called ${handle}.`, "not_found");
   if (r.members.some((m) => lower(m.handle) === lower(profile.handle))) throw new OperationError(`${profile.handle} is already on ${r.name}.`, "conflict");
   if (r.members.length >= MAX_MEMBERS) throw new OperationError(`Teams can have up to ${MAX_MEMBERS} players, subs included.`);
-  if (role && !GAMES[r.game].roles.includes(role)) throw new OperationError(`Pick a ${GAMES[r.game].name} role.`);
+  if (role && !GAMES[r.game].roleOptions.includes(role)) throw new OperationError(`Pick a ${GAMES[r.game].name} role.`);
   return {
     roster: { ...r, members: [...r.members, { handle: profile.handle, role, status: "invited" }] },
     notices: [{ recipient: profile.handle, kind: "team", body: `${r.captain} invited you to join ${r.name} (${GAMES[r.game].name}).`, link }],

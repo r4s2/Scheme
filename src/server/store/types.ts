@@ -1,5 +1,5 @@
 import type { FormatId, GameId } from "@/engine";
-import type { AuditEntry, Effects, Notice, Outcome, Profile, Roster, TournamentAgg, TournamentStatus } from "../model";
+import type { AuditEntry, Effects, GameAccount, Notice, Outcome, Profile, RankRule, Roster, TournamentAgg, TournamentStatus } from "../model";
 
 /** What the tournament library and lists need, without loading whole tournaments. */
 export interface TournamentSummary {
@@ -21,6 +21,7 @@ export interface TournamentSummary {
   startsAt: string;
   rankMin: number;
   rankMax: number;
+  rankRule: RankRule;
   /** Names of first-place teams once the event is closed. */
   winners: string[];
   /** Everyone playing in it (team players, subs and solo sign-ups), for "My tournaments". */
@@ -66,6 +67,14 @@ export interface Store {
   /** Every player with their linked accounts, for the Teams page's player directory. */
   directory(): Promise<Profile[]>;
   setLookingForTeam(handle: string, on: boolean): Promise<void>;
+  /** Players whose handle or a linked account name contains the query: exact and prefix matches first. */
+  searchProfiles(query: string, limit: number): Promise<Profile[]>;
+  /**
+   * Add or update one of a player's linked game accounts. New accounts are
+   * self-reported; a verified account keeps its name and rank and only its roles change.
+   */
+  saveGameAccount(handle: string, account: GameAccount): Promise<void>;
+  removeGameAccount(handle: string, game: GameId): Promise<void>;
   /** Every saved team, for the team library. */
   allRosters(): Promise<Roster[]>;
   /** Saved teams the player captains or belongs to (including pending invites). */

@@ -24,20 +24,33 @@ const num = (fd: FormData, name: string) => {
   return n;
 };
 
+/** A roster list sent as JSON: [{ handle, role }]. */
+function spots(fd: FormData, name: string, optional = false): reg.RosterSpot[] {
+  const raw = fd.get(name);
+  if (optional && (raw === null || raw === "")) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(String(raw ?? ""));
+  } catch {
+    throw new OperationError("The roster couldn't be read.");
+  }
+  if (!Array.isArray(list) || list.length > 12 || !list.every((p) => p && typeof p.handle === "string" && typeof p.role === "string" && p.handle.length <= 40)) {
+    throw new OperationError("The roster couldn't be read.");
+  }
+  return list.map((p) => ({ handle: p.handle, role: p.role }));
+}
+
 /** Map a form submission to an operation. Every operation checks its own permissions. */
 async function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData, store: Store): Promise<Outcome> {
   switch (name) {
-    case "registerTeam": {
-      let players: unknown;
-      try {
-        players = JSON.parse(field(fd, "players"));
-      } catch {
-        throw new OperationError("The roster couldn't be read.");
-      }
-      if (!Array.isArray(players) || !players.every((p) => p && typeof p.handle === "string" && typeof p.role === "string")) throw new OperationError("The roster couldn't be read.");
-      const entry = { name: field(fd, "name"), players: players as { handle: string; role: string }[] };
-      return reg.registerTeam(agg, ctx, entry, await store.profiles(entry.players.map((p) => p.handle).filter(Boolean)));
+    case "registerTeam":
+    case "updateRoster": {
+      const entry = { name: field(fd, "name"), players: spots(fd, "players"), bench: spots(fd, "bench", true) };
+      const profiles = await store.profiles([...entry.players, ...entry.bench].map((p) => p.handle.trim()).filter(Boolean));
+      return name === "registerTeam" ? reg.registerTeam(agg, ctx, entry, profiles) : reg.updateRoster(agg, ctx, field(fd, "teamId"), entry, profiles);
     }
+    case "confirmSpot":
+      return reg.respondToRoster(agg, ctx, field(fd, "answer") === "yes");
     case "withdrawTeam":
       return reg.withdrawTeam(agg, ctx, field(fd, "teamId"));
     case "joinSolo":

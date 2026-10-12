@@ -1,4 +1,4 @@
-import { FORMAT_NAMES, rankName } from "@/engine";
+import { FORMAT_NAMES, rankName, tierCeiling, tierFloor, type GameId } from "@/engine";
 import { dollars, startText } from "@/lib/format";
 import type { TournamentSummary } from "@/server/store";
 import type { Card } from "./types";
@@ -21,10 +21,25 @@ export function toCards(list: TournamentSummary[], now: Date): Card[] {
       capacity: t.signupType === "solo" ? t.teamCount * t.teamSize : t.teamCount,
       unit: t.signupType === "solo" ? "players" : "teams",
       startText: t.status === "live" ? "Live now" : t.status === "checkin" ? `Check-in open · ${startText(t.startsAt, now)}` : startText(t.startsAt, now),
-      rankText: `${rankName(t.game, t.rankMin)} – ${rankName(t.game, t.rankMax)}`,
+      rankText: t.rankRule === "open" ? "All ranks" : `${rankName(t.game, t.rankMin)} – ${rankName(t.game, t.rankMax)}${t.rankRule === "suggested" ? " (suggested)" : ""}`,
+      rankMin: t.rankMin,
+      rankMax: t.rankMax,
+      rankRule: t.rankRule,
       host: t.host,
       hostKarma: t.hostKarma,
       region: t.region,
       winners: t.winners,
     }));
 }
+
+/** Whether a tournament suits a rank filter. Events without a range suit every rank. */
+export function fitsRank(c: Pick<Card, "game" | "rankMin" | "rankMax" | "rankRule">, rank: string, myRanks: Partial<Record<GameId, number>>): boolean {
+  if (rank === "all" || c.rankRule === "open") return true;
+  if (rank === "mine") {
+    const mine = myRanks[c.game];
+    return mine !== undefined && mine >= c.rankMin && mine <= c.rankMax;
+  }
+  const tier = Number(rank);
+  return tierFloor(c.game, tier) <= c.rankMax && tierCeiling(c.game, tier) >= c.rankMin;
+}
+

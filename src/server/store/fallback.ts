@@ -1,4 +1,5 @@
-import type { AuditEntry, Effects, Notice, Outcome, Profile, Roster, TournamentAgg } from "../model";
+import type { GameId } from "@/engine";
+import type { AuditEntry, Effects, GameAccount, Notice, Outcome, Profile, Roster, TournamentAgg } from "../model";
 import type { Person, Store, StoredNotice, TournamentSummary, Win } from "./types";
 
 /** Error codes that mean "couldn't reach the database", as opposed to a query the database rejected. */
@@ -130,6 +131,18 @@ export class FallbackStore implements Store {
 
   setLookingForTeam(handle: string, on: boolean): Promise<void> {
     return this.write((s) => s.setLookingForTeam(handle, on));
+  }
+
+  searchProfiles(query: string, limit: number): Promise<Profile[]> {
+    return this.read((s) => s.searchProfiles(query, limit));
+  }
+
+  saveGameAccount(handle: string, account: GameAccount): Promise<void> {
+    return this.write((s) => s.saveGameAccount(handle, account));
+  }
+
+  removeGameAccount(handle: string, game: GameId): Promise<void> {
+    return this.write((s) => s.removeGameAccount(handle, game));
   }
 
   allRosters(): Promise<Roster[]> {

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { GAMES, rankName } from "@/engine";
+import { GAMES } from "@/engine";
 import { toCards } from "@/components/home/cards";
 import { TournamentCard } from "@/components/home/TournamentCard";
 import { GameBadge } from "@/components/ui/bits";
-import { CheckIcon, TrophyIcon, WarnIcon } from "@/components/ui/icons";
+import { GamePool } from "@/components/profile/GamePool";
+import { TrophyIcon } from "@/components/ui/icons";
 import { formatWhen } from "@/lib/format";
 import { listTournaments } from "@/server/data";
 import { getStore } from "@/server/store";
@@ -85,41 +86,9 @@ export default async function ProfilePage({ params }: { params: Promise<{ handle
 
       <div className="section-h">
         <h2>Game pool</h2>
-        {me && <span className="small muted">Linking more games arrives with sign-in (Riot Sign On, Battle.net).</span>}
+        {me && <span className="small muted">Ranks you enter are self-reported until sign-in links your accounts (Riot Sign On, Battle.net).</span>}
       </div>
-      {profile.accounts.length === 0 ? (
-        <div className="empty">No linked game accounts yet.</div>
-      ) : (
-        <div className="pool">
-          {profile.accounts.map((a) => (
-            <div key={a.game} className="card gcard">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <GameBadge game={a.game} />
-                {a.source === "api" ? (
-                  <span className="pill good">
-                    <CheckIcon />
-                    Verified
-                  </span>
-                ) : (
-                  <span className="pill warn">
-                    <WarnIcon />
-                    Self-reported
-                  </span>
-                )}
-              </div>
-              <div className="rank">{rankName(a.game, a.rankScore)}</div>
-              <dl className="kv">
-                <dt>Account</dt>
-                <dd className="mono">{a.accountName}</dd>
-                <dt>Roles</dt>
-                <dd>{a.roles.join(", ") || "—"}</dd>
-                <dt>Source</dt>
-                <dd>{GAMES[a.game].rankSource}</dd>
-              </dl>
-            </div>
-          ))}
-        </div>
-      )}
+      <GamePool accounts={profile.accounts} editable={me} />
 
       <div className="section-h">
         <h2>Wins</h2>

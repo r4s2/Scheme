@@ -49,7 +49,7 @@ const all = demoTournaments(now);
 const handles = new Set<string>(Object.keys(DEMO_HOST_KARMA));
 for (const t of all) {
   handles.add(t.host);
-  for (const team of Object.values(t.state.teams)) for (const p of team.players) handles.add(p.handle);
+  for (const team of Object.values(t.state.teams)) for (const p of [...team.players, ...(team.bench ?? [])]) handles.add(p.handle);
   for (const p of [...t.subs, ...t.pool]) handles.add(p.handle);
 }
 const people = [...handles].sort();
@@ -82,11 +82,16 @@ for (const t of all) {
     String(t.entryFeeCents), String(t.withholdPct), `'{${t.payoutSplit.join(",")}}'::int[]`,
     `array[${t.state.slots.map((s) => q(teamId(t, s))).join(", ")}]::uuid[]`, deadlines, overrides,
     t.closure ? rel(t.closure.at) : "null", t.closure ? q(t.closure.method) : "null", t.closure ? q(t.closure.message) : "null",
+    q(t.rankRule), String(t.benchMax),
   ]);
   for (const team of Object.values(t.state.teams)) {
     teams.push([q(teamId(t, team.id)), q(id), q(team.name), q(userId(team.captain))]);
-    for (const p of team.players) {
-      players.push([q(teamId(t, team.id)), q(userId(p.handle)), q(p.role), String(p.score), q(p.verified), p.checkedIn ? rel(t.startsAt) : "null"]);
+    const spots = [...team.players.map((p, seat) => ({ p, seat, bench: false })), ...(team.bench ?? []).map((p, seat) => ({ p, seat, bench: true }))];
+    for (const { p, seat, bench } of spots) {
+      players.push([
+        q(teamId(t, team.id)), q(userId(p.handle)), q(p.role), String(p.score), q(p.verified), p.checkedIn ? rel(t.startsAt) : "null",
+        String(bench), String(seat), p.confirmation ? q(p.confirmation) : "null",
+      ]);
     }
   }
   const signups = [...t.subs.map((p) => [p, "sub"] as const), ...t.pool.map((p) => [p, "registered"] as const)];
@@ -162,7 +167,7 @@ insert into tournaments (id, host_id, name, game, format, best_of, signup_type, 
                          rank_min_score, rank_max_score, min_player_karma, verified_ranks_only, checkin_minutes,
                          starts_at, match_window_hours, allow_extensions, house_rules,
                          entry_fee_cents, withhold_pct, payout_split, slots, wave_deadlines, deadline_overrides,
-                         closed_at, close_method, close_message) values
+                         closed_at, close_method, close_message, rank_rule, bench_max) values
 ${values(tournaments)}
 on conflict do nothing;
 
@@ -170,7 +175,7 @@ insert into tournament_teams (id, tournament_id, name, captain_id) values
 ${values(teams)}
 on conflict do nothing;
 
-insert into tournament_players (tournament_team_id, profile_id, role, rank_score, rank_source, checked_in_at) values
+insert into tournament_players (tournament_team_id, profile_id, role, rank_score, rank_source, checked_in_at, bench, seat, confirmation) values
 ${values(players)}
 on conflict do nothing;
 

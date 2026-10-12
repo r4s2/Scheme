@@ -3,6 +3,7 @@ import { GAMES, rankName, rankShortName, type GameId } from "@/engine";
 import { hoverTeam, type HoverTeam } from "@/components/bracket/hover";
 import { TeamLibrary, type PlayerRow, type TeamRow } from "@/components/teams/TeamLibrary";
 import { TeamOp } from "@/components/teams/TeamOp";
+import { PlayerPicker } from "@/components/PlayerPicker";
 import { GameBadge } from "@/components/ui/bits";
 import { getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
@@ -155,10 +156,18 @@ export default async function TeamsPage({ searchParams }: { searchParams: Promis
               </ul>
               {captain ? (
                 <TeamOp op="invite" rosterId={r.id} className="row">
-                  <input name="handle" placeholder="Invite by handle" required aria-label="Player to invite" style={{ flex: 1, minWidth: 120 }} />
+                  <PlayerPicker
+                    name="handle"
+                    game={r.game}
+                    exclude={[r.captain, ...r.members.map((m) => m.handle)]}
+                    placeholder="Search players to invite"
+                    ariaLabel="Player to invite"
+                    required
+                    style={{ flex: 1, minWidth: 160 }}
+                  />
                   <select name="role" aria-label="Role" defaultValue="">
                     <option value="">Any role</option>
-                    {[...new Set(GAMES[r.game].roles)].map((x) => (
+                    {GAMES[r.game].roleOptions.map((x) => (
                       <option key={x}>{x}</option>
                     ))}
                   </select>

@@ -9,7 +9,7 @@ import postgres from "postgres";
 import { buildBracket, findMatch, GAMES, lockedSlots, resultOf } from "@/engine";
 import { openTicket, postAnnouncement, replyTicket } from "../community";
 import { createTournament, newDraft } from "../create";
-import { joinSolo, leaveSolo, registerTeam, withdrawTeam } from "../registration";
+import { joinSolo, leaveSolo, registerTeam, respondToRoster, updateRoster, withdrawTeam } from "../registration";
 import { createRoster, invite } from "../rosters";
 import type { Ctx, TournamentAgg } from "../model";
 import * as op from "../operations";
@@ -137,6 +137,61 @@ describe.skipIf(!url)("PostgresStore (integration)", () => {
     expect(reloaded.announcements.map((a) => [a.audience, a.body])).toEqual([["captains", "Check in by 7:45."]]);
     expect(reloaded.tickets[0]).toMatchObject({ status: "answered", openedBy: "glint" });
     expect(reloaded.tickets[0].messages.map((m) => m.author)).toEqual(["glint", "kestrel"]);
+  });
+
+  it("saves subs, the lineup order and each player's answer", async () => {
+    const draft = { ...newDraft(new Date()), name: "Integration Sub Night", game: "val" as const, signupType: "team" as const, teamCount: 4 as const, rankRule: "suggested" as const, rankMinTier: 4, rankMaxTier: 6, benchMax: 2, verifiedOnly: false };
+    const created = createTournament(draft, ctx("kestrel"), (await store.profiles(["kestrel"]))[0]);
+    let agg = await store.create(created.agg, created.effects);
+    expect(agg).toMatchObject({ rankRule: "suggested", benchMax: 2 });
+    expect((await store.list()).find((t) => t.name === "Integration Sub Night")!.rankRule).toBe("suggested");
+
+    const players = rosterPlayers(await store.rosters("glint"), "Hot Coffee").reverse();
+    players.unshift(...players.splice(players.findIndex((p) => p.handle === "glint"), 1));
+    const bench = [{ handle: "ember", role: "Flex" }];
+    agg = await store.commit(agg, registerTeam(agg, ctx("glint"), { name: "Hot Coffee", players, bench }, await store.profiles([...players, ...bench].map((p) => p.handle))));
+    const id = teamByName(agg, "Hot Coffee");
+    const loaded = (await store.get(agg.id))!;
+    expect(loaded.state.teams[id]).toEqual(agg.state.teams[id]);
+    expect(loaded.state.teams[id].players.map((p) => p.handle)).toEqual(players.map((p) => p.handle));
+    expect(loaded.state.teams[id].bench).toEqual([expect.objectContaining({ handle: "ember", role: "Flex", confirmation: "pending" })]);
+    expect((await store.notifications("ember"))[0]).toMatchObject({ kind: "roster_confirm", body: expect.stringMatching(/as a sub/) });
+
+    agg = await store.commit(agg, respondToRoster(agg, ctx("ember"), true));
+    agg = await store.commit(agg, respondToRoster(agg, ctx(players[1].handle), false));
+    const after = (await store.get(agg.id))!.state.teams[id];
+    expect(after.bench![0].confirmation).toBeUndefined();
+    expect(after.players[1].confirmation).toBe("declined");
+    // The captain moves the sub into the lineup and drops the player who can't make it.
+    const lineup = players.map((p, i) => (i === 1 ? { handle: "ember", role: p.role } : p));
+    agg = await store.commit(agg, updateRoster(agg, ctx("glint"), id, { name: "Hot Coffee", players: lineup, bench: [] }, await store.profiles(lineup.map((p) => p.handle))));
+    const edited = (await store.get(agg.id))!.state.teams[id];
+    expect(edited).toEqual(agg.state.teams[id]);
+    expect(edited.players[1]).toMatchObject({ handle: "ember" });
+    expect(edited.players[1].confirmation).toBeUndefined();
+    expect(edited.bench).toEqual([]);
+    // Subs show up as playing in the event.
+    expect((await store.list()).find((t) => t.id === agg.id)!.players).toContain("ember");
+  });
+
+  it("searches players and edits game pools", async () => {
+    const hits = await store.searchProfiles("gli", 5);
+    expect(hits[0].handle).toBe("glint");
+    expect(await store.searchProfiles("%", 5)).toEqual([]);
+    expect((await store.searchProfiles("#NA1", 50)).length).toBeGreaterThan(5);
+
+    await store.saveGameAccount("glint", { game: "lol", accountName: "glint#NA1", rankScore: 13, roles: ["Mid"], source: "api" });
+    const lol = () => store.profiles(["glint"]).then(([p]) => p.accounts.find((a) => a.game === "lol"));
+    expect(await lol()).toEqual({ game: "lol", accountName: "glint#NA1", rankScore: 13, roles: ["Mid"], source: "self" });
+    await store.saveGameAccount("glint", { game: "lol", accountName: "glint#EUW", rankScore: 15, roles: ["Top", "Fill"], source: "self" });
+    expect(await lol()).toMatchObject({ accountName: "glint#EUW", rankScore: 15, roles: ["Top", "Fill"] });
+    await store.removeGameAccount("glint", "lol");
+    expect(await lol()).toBeUndefined();
+
+    const val = (await store.profiles(["glint"]))[0].accounts.find((a) => a.game === "val")!;
+    await store.saveGameAccount("glint", { ...val, accountName: "fake#000", rankScore: 1, roles: ["Sentinel"] });
+    expect((await store.profiles(["glint"]))[0].accounts.find((a) => a.game === "val")).toEqual({ ...val, roles: ["Sentinel"] });
+    await store.saveGameAccount("glint", val);
   });
 
   it("keeps solo sign-ups and builds teams from them", async () => {

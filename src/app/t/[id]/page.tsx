@@ -12,14 +12,16 @@ import { HostBracket } from "@/components/tournament/HostBracket";
 import { PlayerMatch } from "@/components/tournament/PlayerMatch";
 import { Announcements, Tickets } from "@/components/tournament/Community";
 import { Registration, type SignupContext } from "@/components/tournament/Registration";
+import { Rosters } from "@/components/tournament/Rosters";
+import { Hidden, Op } from "@/components/tournament/Op";
 import { Stats } from "@/components/tournament/Stats";
 import { Tabs } from "@/components/tournament/Tabs";
 import { WinnerPopup } from "@/components/tournament/WinnerPopup";
 import { dollars, formatWhen } from "@/lib/format";
 import { teamWins } from "@/server/data";
 import type { TournamentAgg } from "@/server/model";
-import { ineligibility } from "@/server/registration";
-import { runDueJobs, teamOf } from "@/server/operations";
+import { fullRoster, ineligibility, rankNote } from "@/server/registration";
+import { rosterTeamOf, runDueJobs, teamOf } from "@/server/operations";
 import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
 import { deskItems } from "@/server/views";
@@ -61,7 +63,8 @@ export default async function TournamentPage({
   const deskCount = registering ? 0 : deskItems(agg, now).count;
 
   type Tab = [key: string, label: string, count?: number];
-  const inEvent = !!actor && (!!onTeam || agg.subs.some((p) => p.handle === actor) || agg.pool.some((p) => p.handle === actor));
+  const rosterTeam = actor ? rosterTeamOf(agg, actor) : null;
+  const inEvent = !!actor && (!!rosterTeam || agg.subs.some((p) => p.handle === actor) || agg.pool.some((p) => p.handle === actor));
   const openTickets = agg.tickets.filter((k) => k.status === "open" && (isHost || k.openedBy === actor)).length;
   const hasTeams = Object.keys(agg.state.teams).length > 0;
   const tabs: Tab[] = [];
@@ -72,6 +75,7 @@ export default async function TournamentPage({
     if (isHost) tabs.push(["desk", "Match desk", deskCount]);
     if (isHost && agg.status === "checkin") tabs.push(["checkin", "Check-in"]);
   }
+  if (hasTeams) tabs.push(["rosters", "Rosters"]);
   if (hasTeams) tabs.push(["stats", "Stats"]);
   tabs.push(["announce", "Announcements"]);
   if (isHost || inEvent) tabs.push(["tickets", "Tickets", openTickets]);
@@ -82,7 +86,7 @@ export default async function TournamentPage({
   // Everything the tabs need, fetched together so switching tabs needs no further round trips.
   const [wins, signup, log] = await Promise.all([
     teamWins(agg.game),
-    registering && actor && !isHost ? signupContext(agg, actor) : Promise.resolve<SignupContext>({ actor, rosters: [], soloBlocker: null }),
+    registering && actor && !isHost ? signupContext(agg, actor) : Promise.resolve<SignupContext>({ actor, rosters: [], soloBlocker: null, soloNote: null }),
     isHost ? store.auditLog(id) : Promise.resolve([]),
   ]);
   const pill: Record<string, [string, string]> = {
@@ -94,6 +98,12 @@ export default async function TournamentPage({
     cancelled: ["quiet", "Cancelled"],
   };
   const myTeam = onTeam ? agg.state.teams[onTeam] : null;
+  const benchTeam = !onTeam && rosterTeam ? agg.state.teams[rosterTeam] : null;
+  // The viewer's answer to the captain who listed them, if they haven't confirmed.
+  const rosterTeamObj = rosterTeam ? agg.state.teams[rosterTeam] : null;
+  const mySpot = rosterTeamObj && actor ? fullRoster(rosterTeamObj).find((p) => p.handle === actor) : undefined;
+  const asSub = !!rosterTeamObj?.bench?.some((p) => p.handle === actor);
+  const askAnswer = (registering || agg.status === "checkin") && mySpot?.confirmation ? mySpot.confirmation : null;
   const won = !!onTeam && agg.status === "complete" && !!agg.closure?.places[0]?.includes(onTeam);
   const myPrize = agg.payouts.filter((p) => p.handle === actor).reduce((n, p) => n + p.cents, 0);
 
@@ -119,7 +129,7 @@ export default async function TournamentPage({
           </div>
         </div>
         <p className="small muted" style={{ maxWidth: 320 }}>
-          {actor ? (isHost ? "You're the host." : myTeam ? `You play for ${myTeam.name}.` : "You're following this event.") : "Read only."}
+          {actor ? (isHost ? "You're the host." : myTeam ? `You play for ${myTeam.name}.` : benchTeam ? `You're a sub for ${benchTeam.name}.` : "You're following this event.") : "Read only."}
         </p>
       </div>
 
@@ -131,6 +141,38 @@ export default async function TournamentPage({
       {sp.err && (
         <div data-flash="err" className="banner bad" role="alert">
           <div className="btext">{sp.err}</div>
+        </div>
+      )}
+
+      {askAnswer && rosterTeamObj && mySpot && (
+        <div className={`banner ${askAnswer === "declined" ? "bad" : "info"}`} role="status">
+          <div className="btext">
+            {askAnswer === "pending" ? (
+              <>
+                <b>
+                  {rosterTeamObj.captain} added you to {rosterTeamObj.name} {asSub ? "as a sub" : "as a starter"} ({mySpot.role}).
+                </b>
+                <span className="small">Confirm you&apos;re playing so your captain knows the roster is set.</span>
+              </>
+            ) : (
+              <>
+                <b>You told {rosterTeamObj.captain} you can&apos;t play for {rosterTeamObj.name}.</b>
+                <span className="small">Changed your mind? Confirm until your captain replaces you.</span>
+              </>
+            )}
+          </div>
+          <div className="row">
+            <Op tid={agg.id} op="confirmSpot">
+              <Hidden name="answer" value="yes" />
+              <button className="btn sm primary">I&apos;m playing</button>
+            </Op>
+            {askAnswer === "pending" && (
+              <Op tid={agg.id} op="confirmSpot">
+                <Hidden name="answer" value="no" />
+                <button className="btn sm">Can&apos;t play</button>
+              </Op>
+            )}
+          </div>
         </div>
       )}
 
@@ -148,6 +190,7 @@ export default async function TournamentPage({
               </>
             ),
           desk: isHost && !registering ? <Desk agg={agg} now={now} /> : null,
+          rosters: hasTeams ? <Rosters agg={agg} /> : null,
           stats: hasTeams ? <Stats agg={agg} /> : null,
           announce: <Announcements agg={agg} isHost={isHost} />,
           tickets: isHost || inEvent ? <Tickets agg={agg} actor={actor} isHost={isHost} /> : null,
@@ -203,7 +246,7 @@ async function signupContext(agg: TournamentAgg, actor: string): Promise<SignupC
   const store = getStore();
   if (agg.signupType === "solo") {
     const [me] = await store.profiles([actor]);
-    return { actor, rosters: [], soloBlocker: ineligibility(agg, me, actor) };
+    return { actor, rosters: [], soloBlocker: ineligibility(agg, me, actor), soloNote: rankNote(agg, me) };
   }
   const mine = (await store.rosters(actor)).filter((r) => r.game === agg.game && r.captain === actor);
   const handles = [...new Set(mine.flatMap((r) => r.members.filter((m) => m.status === "active").map((m) => m.handle)))];
@@ -212,6 +255,7 @@ async function signupContext(agg: TournamentAgg, actor: string): Promise<SignupC
   return {
     actor,
     soloBlocker: null,
+    soloNote: null,
     rosters: mine.map((r) => ({
       id: r.id,
       name: r.name,
@@ -220,7 +264,7 @@ async function signupContext(agg: TournamentAgg, actor: string): Promise<SignupC
         .map((m) => {
           const p = byHandle.get(m.handle.toLowerCase());
           const acct = p?.accounts.find((a) => a.game === agg.game);
-          return { handle: m.handle, role: m.role, rank: acct ? rankName(agg.game, acct.rankScore) : "—", blocker: ineligibility(agg, p, m.handle) };
+          return { handle: m.handle, role: m.role, rank: acct ? rankName(agg.game, acct.rankScore) : "—", blocker: ineligibility(agg, p, m.handle), note: rankNote(agg, p) };
         }),
     })),
   };

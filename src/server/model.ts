@@ -10,6 +10,12 @@ import type { CloseMethod, GameId, Player, RankSource, Schedule, TournamentState
  * database, the tournament_teams uuid).
  */
 
+/**
+ * How a tournament uses its rank range: no range, a suggestion players see
+ * (and can filter by) but may sign up outside of, or a requirement.
+ */
+export type RankRule = "open" | "suggested" | "required";
+
 export type TournamentStatus = "draft" | "registration" | "checkin" | "live" | "complete" | "cancelled";
 
 export interface Report {
@@ -138,11 +144,14 @@ export interface TournamentAgg {
   startsAt: string;
   /** Teams the event is built for (4, 8, 16 or 32). */
   teamCount: number;
-  /** Allowed rank range, as ladder scores. */
+  /** Rank range, as ladder scores. With rankRule "open" it spans the whole ladder. */
   rankMin: number;
   rankMax: number;
+  rankRule: RankRule;
   /** One entry per seat on a team, e.g. Overwatch 5v5 or 6v6. */
   roles: string[];
+  /** Most substitutes a team can register on top of its starters. */
+  benchMax: number;
   requirements: { minKarma: number; verifiedOnly: boolean };
   /** How solo sign-ups are turned into teams. */
   balanceGoal: "even" | "tiers";

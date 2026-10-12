@@ -1,5 +1,6 @@
-import type { AuditEntry, Effects, Notice, Outcome, Profile, Roster, TournamentAgg } from "../model";
-import { peopleOf, summarize, winsOf } from "../summary";
+import { GAMES, type GameId } from "@/engine";
+import type { AuditEntry, Effects, GameAccount, Notice, Outcome, Profile, Roster, TournamentAgg } from "../model";
+import { matchesQuery, peopleOf, sortMatches, summarize, winsOf } from "../summary";
 import { ConflictError, type Person, type Store, type StoredNotice, type TournamentSummary, type Win } from "./types";
 
 /**
@@ -91,6 +92,32 @@ export class MemoryStore implements Store {
   async setLookingForTeam(handle: string, on: boolean): Promise<void> {
     const p = this.profileMap.get(handle.toLowerCase());
     if (p) p.lookingForTeam = on;
+  }
+
+  async searchProfiles(query: string, limit: number): Promise<Profile[]> {
+    return sortMatches([...this.profileMap.values()].filter((p) => matchesQuery(p, query)), query)
+      .slice(0, limit)
+      .map((p) => structuredClone(p));
+  }
+
+  async saveGameAccount(handle: string, account: GameAccount): Promise<void> {
+    const p = this.profileMap.get(handle.toLowerCase());
+    if (!p) return;
+    const old = p.accounts.find((a) => a.game === account.game);
+    if (old) {
+      old.roles = [...account.roles];
+      if (old.source !== "api") Object.assign(old, { accountName: account.accountName, rankScore: account.rankScore });
+    } else {
+      p.accounts.push({ ...account, roles: [...account.roles], source: "self" });
+      // Same order as the database's game_id enum.
+      const order = Object.keys(GAMES);
+      p.accounts.sort((a, b) => order.indexOf(a.game) - order.indexOf(b.game));
+    }
+  }
+
+  async removeGameAccount(handle: string, game: GameId): Promise<void> {
+    const p = this.profileMap.get(handle.toLowerCase());
+    if (p) p.accounts = p.accounts.filter((a) => a.game !== game);
   }
 
   async allRosters(): Promise<Roster[]> {

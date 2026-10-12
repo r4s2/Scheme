@@ -10,7 +10,8 @@ export interface HoverTeam {
   gameShort: string;
   stateLabel: string;
   stateTone: "good" | "warn" | "info";
-  players: { handle: string; role: string; rank: string; verified: "api" | "self"; checkedIn: boolean }[];
+  /** Starters, then subs. */
+  players: { handle: string; role: string; rank: string; verified: "api" | "self"; checkedIn: boolean; sub: boolean; answer?: "pending" | "declined" }[];
 }
 
 export type Phase = "registration" | "checkin" | "play";
@@ -27,7 +28,15 @@ export function hoverTeam(t: Team, game: GameId, wins: number, phase: Phase = "p
     gameShort: GAMES[game].name.split(" ")[0],
     stateLabel: phase === "registration" ? "Registered" : allIn ? "Checked in" : "Not all checked in",
     stateTone: phase === "registration" ? "info" : allIn ? "good" : "warn",
-    players: t.players.map((p) => ({ handle: p.handle, role: p.role, rank: rankShortName(game, p.score), verified: p.verified, checkedIn: p.checkedIn })),
+    players: [...t.players.map((p) => [p, false] as const), ...(t.bench ?? []).map((p) => [p, true] as const)].map(([p, sub]) => ({
+      handle: p.handle,
+      role: p.role,
+      rank: rankShortName(game, p.score),
+      verified: p.verified,
+      checkedIn: p.checkedIn,
+      sub,
+      ...(p.confirmation ? { answer: p.confirmation } : {}),
+    })),
   };
 }
 

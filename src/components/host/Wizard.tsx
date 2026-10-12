@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { blockedNameTerms, FORMAT_NAMES, GAMES, suggestNames, tierCeiling, tierFloor, type ComplianceIssue, type FormatId, type GameId } from "@/engine";
+import { BENCH_LIMIT, blockedNameTerms, FORMAT_NAMES, GAMES, suggestNames, tierCeiling, tierFloor, type ComplianceIssue, type FormatId, type GameId } from "@/engine";
 import { publishTournament } from "@/app/host/actions";
 import { toast } from "@/components/Toaster";
 import { GameDot } from "@/components/ui/bits";
@@ -116,7 +116,7 @@ export function Wizard({ hostKarma, now: nowIso }: { hostKarma: number; now: str
                     <GameDot game={g} /> {GAMES[g].name}
                   </>,
                   `${GAMES[g].roles.length}v${GAMES[g].roles.length} · Ranks: ${GAMES[g].rankSource}`,
-                  (v) => setD((x) => ({ ...x, game: v, rankMinTier: Math.min(x.rankMinTier, GAMES[v].tiers.length - 1), rankMaxTier: Math.min(x.rankMaxTier, GAMES[v].tiers.length - 1), owSixes: v === "ow" && x.owSixes })),
+                  (v) => setD((x) => ({ ...x, game: v, rankMinTier: Math.min(x.rankMinTier, GAMES[v].tiers.length - 1), rankMaxTier: Math.min(x.rankMaxTier, GAMES[v].tiers.length - 1), owSixes: v === "ow" && x.owSixes, benchMax: GAMES[v].benchMax })),
                 ),
               )}
             </div>
@@ -194,6 +194,21 @@ export function Wizard({ hostKarma, now: nowIso }: { hostKarma: number; now: str
               {radio("signup", "team", d.signupType, "Team sign-up", "Captains register a saved roster in one step.", (v) => set("signupType", v))}
               {radio("signup", "solo", d.signupType, "Solo sign-up", "Players join alone. Scheme builds the teams.", (v) => set("signupType", v))}
             </div>
+            {d.signupType === "team" && (
+              <label className="field" style={{ marginTop: 16, maxWidth: 320 }}>
+                <span>
+                  Subs per team <span className="help">on top of the {roles.length} starters</span>
+                </span>
+                <select value={d.benchMax} onChange={(e) => set("benchMax", Number(e.target.value))}>
+                  {Array.from({ length: BENCH_LIMIT + 1 }, (_, n) => (
+                    <option key={n} value={n}>
+                      {n === 0 ? "No subs" : `Up to ${n}`}
+                      {n === G.benchMax ? " (typical)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {d.signupType === "solo" && (
               <>
                 <h3 style={{ fontSize: 15, margin: "20px 0 8px" }}>How should teams be built?</h3>
@@ -211,27 +226,37 @@ export function Wizard({ hostKarma, now: nowIso }: { hostKarma: number; now: str
           <>
             <h2>Requirements</h2>
             <p className="lead">Checked automatically against each player&apos;s linked account.</p>
-            <div className="grid2">
-              <label className="field">
-                <span>Rank floor</span>
-                <select value={d.rankMinTier} onChange={(e) => set("rankMinTier", Number(e.target.value))}>
-                  {G.tiers.map((t, i) => (
-                    <option key={t} value={i}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Rank ceiling</span>
-                <select value={d.rankMaxTier} onChange={(e) => set("rankMaxTier", Number(e.target.value))}>
-                  {G.tiers.map((t, i) => (
-                    <option key={t} value={i}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <h3 style={{ fontSize: 15, margin: "0 0 8px" }}>Rank range</h3>
+            <div className="opts">
+              {radio("rankRule", "open", d.rankRule, "All ranks", "No range. Anyone can sign up.", (v) => set("rankRule", v))}
+              {radio("rankRule", "suggested", d.rankRule, "Suggested range", "Shown on the listing and used by the rank filter. Players outside it can still sign up.", (v) => set("rankRule", v))}
+              {radio("rankRule", "required", d.rankRule, "Required range", "Players outside it can't sign up.", (v) => set("rankRule", v))}
+            </div>
+            <div className="grid2" style={{ marginTop: 16 }}>
+              {d.rankRule !== "open" && (
+                <>
+                  <label className="field">
+                    <span>Rank floor</span>
+                    <select value={d.rankMinTier} onChange={(e) => set("rankMinTier", Number(e.target.value))}>
+                      {G.tiers.map((t, i) => (
+                        <option key={t} value={i}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Rank ceiling</span>
+                    <select value={d.rankMaxTier} onChange={(e) => set("rankMaxTier", Number(e.target.value))}>
+                      {G.tiers.map((t, i) => (
+                        <option key={t} value={i}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
               <label className="field">
                 <span>
                   Minimum player karma <span className="help">0 to 100</span>
@@ -386,10 +411,16 @@ export function Wizard({ hostKarma, now: nowIso }: { hostKarma: number; now: str
                 {FORMAT_NAMES[d.format]} · {d.teamCount} teams · Bo{d.bestOf}
               </dd>
               <dt>Sign-up</dt>
-              <dd>{d.signupType === "solo" ? `Solo, ${d.balanceGoal === "even" ? "even teams" : "rank tiers"}` : "Teams"}</dd>
+              <dd>
+                {d.signupType === "solo"
+                  ? `Solo, ${d.balanceGoal === "even" ? "even teams" : "rank tiers"}`
+                  : `Teams of ${roles.length}${d.benchMax ? ` plus up to ${d.benchMax} sub${d.benchMax === 1 ? "" : "s"}` : ", no subs"}`}
+              </dd>
               <dt>Ranks</dt>
               <dd>
-                {G.tiers[d.rankMinTier]} to {G.tiers[d.rankMaxTier]} ({tierCeiling(d.game, d.rankMaxTier) - tierFloor(d.game, d.rankMinTier) + 1} divisions)
+                {d.rankRule === "open"
+                  ? "All ranks"
+                  : `${G.tiers[d.rankMinTier]} to ${G.tiers[d.rankMaxTier]} (${d.rankRule}, ${tierCeiling(d.game, d.rankMaxTier) - tierFloor(d.game, d.rankMinTier) + 1} divisions)`}
                 {d.verifiedOnly || d.paid ? ", verified only" : ""}
               </dd>
               <dt>Starts</dt>

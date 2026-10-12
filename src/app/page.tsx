@@ -3,12 +3,15 @@ import { toCards } from "@/components/home/cards";
 import { Library } from "@/components/home/Library";
 import { Ticker } from "@/components/leaderboard/Ticker";
 import { leaderboards, listTournaments } from "@/server/data";
-import { storeMode } from "@/server/store";
+import { getStore, storeMode } from "@/server/store";
+import { currentActor } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [list, boards] = await Promise.all([listTournaments(), leaderboards()]);
+  const actor = await currentActor();
+  const [list, boards, me] = await Promise.all([listTournaments(), leaderboards(), actor ? getStore().profiles([actor]) : Promise.resolve([])]);
+  const myRanks = Object.fromEntries((me[0]?.accounts ?? []).map((a) => [a.game, a.rankScore])) as Partial<Record<GameId, number>>;
   const now = new Date();
   const mode = storeMode();
   const open = list.filter((t) => t.status === "registration" || t.status === "checkin" || t.status === "live");
@@ -29,6 +32,7 @@ export default async function Home() {
       )}
       <Library
         cards={cards}
+        myRanks={myRanks}
         hero={
           <>
             <h1>Find a bracket for tonight.</h1>

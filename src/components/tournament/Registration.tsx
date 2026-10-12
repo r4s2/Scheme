@@ -1,11 +1,12 @@
-import { rankShortName } from "@/engine";
+import { rankName, rankShortName, type Team } from "@/engine";
 import { hoverTeam } from "@/components/bracket/hover";
 import { HoverLayer } from "@/components/bracket/HoverLayer";
 import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 import { startText } from "@/lib/format";
 import type { TournamentAgg } from "@/server/model";
-import { capacity, registeredCount } from "@/server/registration";
+import { capacity, fullRoster, rangeText, registeredCount, type EligibilityRules } from "@/server/registration";
 import { Hidden, Op } from "./Op";
+import { RosterEditor } from "./RosterEditor";
 import { TeamSignup, type RosterOption } from "./TeamSignup";
 
 export interface SignupContext {
@@ -14,6 +15,16 @@ export interface SignupContext {
   rosters: RosterOption[];
   /** Why the viewer can't sign up solo, or null if they can. */
   soloBlocker: string | null;
+  /** A heads-up for a solo sign-up outside a suggested rank range. */
+  soloNote: string | null;
+}
+
+/** "3 unconfirmed · 1 can't play", or "" when everyone has confirmed. */
+function answers(t: Team): string {
+  const all = fullRoster(t);
+  const waiting = all.filter((p) => p.confirmation === "pending").length;
+  const out = all.filter((p) => p.confirmation === "declined").length;
+  return [waiting ? `${waiting} unconfirmed` : "", out ? `${out} can't play` : ""].filter(Boolean).join(" · ");
 }
 
 /** While sign-ups are open: who's in, signing up (team or solo), and the host's controls. */
@@ -27,7 +38,16 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
   const pct = Math.min(100, (registered / cap) * 100);
   const hover = Object.fromEntries(teams.map((t) => [t.id, hoverTeam(t, agg.game, wins[t.name.toLowerCase()] ?? 0, "registration")]));
   const me = signup.actor;
-  const myTeam = me ? teams.find((t) => t.players.some((p) => p.handle === me)) : undefined;
+  const myTeam = me ? teams.find((t) => fullRoster(t).some((p) => p.handle === me)) : undefined;
+  const rules: EligibilityRules = { game: agg.game, rankRule: agg.rankRule, rankMin: agg.rankMin, rankMax: agg.rankMax, requirements: agg.requirements };
+  /** Everyone in the event except one team's roster. */
+  const takenBy = (teamId?: string) => [
+    ...teams.filter((t) => t.id !== teamId).flatMap((t) => fullRoster(t).map((p) => p.handle)),
+    ...agg.subs.map((p) => p.handle),
+    ...agg.pool.map((p) => p.handle),
+  ];
+  const range = rangeText(agg);
+  const form = (teamId?: string) => ({ tid: agg.id, game: agg.game, roles: agg.roles, benchMax: agg.benchMax, rules, taken: takenBy(teamId), rosters: signup.rosters, actor: me ?? "" });
   const mySolo = me ? agg.pool.find((p) => p.handle === me) : undefined;
   const canOpen = teams.length === agg.teamCount;
 
@@ -40,7 +60,8 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
           </b>
           <span className="small">
             {full ? "Full. " : `${cap - registered} spot${cap - registered === 1 ? "" : "s"} left. `}
-            Starts {startText(agg.startsAt, now)}. {solo ? (built ? "Teams are built." : `When registration closes, Scheme balances everyone into teams of ${agg.roles.length}.`) : "Captains register their whole team."}
+            Starts {startText(agg.startsAt, now)}. {solo ? (built ? "Teams are built." : `When registration closes, Scheme balances everyone into teams of ${agg.roles.length}.`) : `Captains register their whole team${agg.benchMax ? `, plus up to ${agg.benchMax} sub${agg.benchMax === 1 ? "" : "s"}` : ""}.`}
+            {range ? ` ${agg.rankRule === "required" ? "Ranks" : "Suggested ranks"}: ${range}.` : " All ranks welcome."}
           </span>
         </div>
         {isHost && solo && !built && (
@@ -65,19 +86,36 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
       {/* Signing up */}
       {me && !isHost && (
         <div className="card panel">
-          {myTeam ? (
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <p>
-                You&apos;re registered with <b>{myTeam.name}</b>
-                {myTeam.captain === me ? " as captain." : `, captained by ${myTeam.captain}.`}
-              </p>
-              {myTeam.captain === me && !built && (
+          {myTeam && myTeam.captain === me && !built ? (
+            <RosterEditor
+              {...form(myTeam.id)}
+              known={Object.fromEntries(fullRoster(myTeam).map((p) => [p.handle, { rank: rankName(agg.game, p.score), blocker: null, note: null }]))}
+              edit={{
+                teamId: myTeam.id,
+                name: myTeam.name,
+                players: myTeam.players.map((p) => ({ handle: p.handle, role: p.role })),
+                bench: (myTeam.bench ?? []).map((p) => ({ handle: p.handle, role: p.role })),
+                answers: Object.fromEntries(fullRoster(myTeam).flatMap((p) => (p.confirmation ? [[p.handle, p.confirmation]] : []))),
+              }}
+              summary={
+                <p>
+                  You&apos;re registered with <b>{myTeam.name}</b> as captain.{" "}
+                  <span className="small muted">{answers(myTeam) || "Everyone has confirmed."}</span>
+                </p>
+              }
+              actions={
                 <Op tid={agg.id} op="withdrawTeam">
                   <Hidden name="teamId" value={myTeam.id} />
                   <button className="btn sm danger">Withdraw team</button>
                 </Op>
-              )}
-            </div>
+              }
+            />
+          ) : myTeam ? (
+            <p>
+              You&apos;re registered with <b>{myTeam.name}</b>
+              {myTeam.bench?.some((p) => p.handle === me) ? " as a sub" : ""}
+              {myTeam.captain === me ? " as captain." : `, captained by ${myTeam.captain}.`}
+            </p>
           ) : mySolo ? (
             <div className="row" style={{ justifyContent: "space-between" }}>
               <p>
@@ -92,6 +130,11 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
           ) : solo ? (
             <>
               <h3>Sign up solo</h3>
+              {signup.soloNote && !signup.soloBlocker && (
+                <p className="small picker-warn" style={{ marginBottom: 8 }}>
+                  {signup.soloNote}. You can still sign up.
+                </p>
+              )}
               {signup.soloBlocker ? (
                 <p className="small" style={{ color: "var(--bad)" }}>
                   {signup.soloBlocker}
@@ -111,7 +154,7 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
               )}
             </>
           ) : (
-            <TeamSignup tid={agg.id} roles={agg.roles} rosters={signup.rosters} actor={me} />
+            <TeamSignup {...form()} />
           )}
         </div>
       )}
@@ -173,6 +216,8 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
                 <div className="row" style={{ justifyContent: "space-between", padding: "0 6px" }}>
                   <p className="tiny muted">
                     Captain {t.captain} · {t.players.length} players
+                    {t.bench?.length ? ` + ${t.bench.length} sub${t.bench.length === 1 ? "" : "s"}` : ""}
+                    {answers(t) && <span className="picker-warn"> · {answers(t)}</span>}
                   </p>
                   {isHost && !solo && (
                     <Op tid={agg.id} op="withdrawTeam">

@@ -1,4 +1,4 @@
-import { GAMES, buildBracket, finalPlaces, makeSchedule, pairKey, playableMatches, recordResult, type FormatId, type GameId, type Player, type Team, type TournamentState } from "@/engine";
+import { GAMES, averageScore, buildBracket, finalPlaces, makeSchedule, pairKey, playableMatches, recordResult, type FormatId, type GameId, type Player, type Team, type TournamentState } from "@/engine";
 import type { Profile, Roster, TournamentAgg } from "./model";
 
 /**
@@ -14,7 +14,28 @@ import type { Profile, Roster, TournamentAgg } from "./model";
  * - Forty closed events whose winners fill the leaderboards.
  */
 export function demoTournaments(now: Date): TournamentAgg[] {
-  return [fridayNightSpike(now), saturdaySixStack(now), ...library(now), ...history(now)];
+  const all = [fridayNightSpike(now), saturdaySixStack(now), ...library(now), ...history(now)];
+  addBenches(all);
+  return all;
+}
+
+/**
+ * Some open team events have substitutes on their rosters, and one player
+ * hasn't confirmed yet. Added last so the other generated handles don't move.
+ */
+function addBenches(all: TournamentAgg[]) {
+  for (const t of all) {
+    if (t.status !== "registration" || t.signupType !== "team") continue;
+    const teams = Object.values(t.state.teams);
+    teams.forEach((team, i) => {
+      if (i % 3 !== 0) return;
+      const [h] = handlesFor(`${t.id}:bench:${i}`, 1);
+      const role = GAMES[t.game].subRole;
+      team.bench = [{ ...player(h, role, Math.max(0, Math.round(averageScore(team)) - 1), t.game === "mr" ? "self" : "api", false) }];
+    });
+    const last = teams.at(-1);
+    if (last) last.players[last.players.length - 1].confirmation = "pending";
+  }
 }
 
 /** Host karma for everyone who hosts in the sample data. */
@@ -93,6 +114,8 @@ function base(o: Partial<TournamentAgg> & Pick<TournamentAgg, "id" | "name" | "g
     state: { format, bestOf, slots: Object.keys(teams), teams, results: {} },
     schedule: { waveDeadlines: [], overrides: {} },
     roles: GAMES[o.game].roles,
+    rankRule: "required",
+    benchMax: GAMES[o.game].benchMax,
     requirements: { minKarma: 0, verifiedOnly: o.game !== "mr" },
     balanceGoal: "even",
     checkinMinutes: 60,
@@ -239,18 +262,20 @@ interface Listing {
   host: string;
   rankMin: number;
   rankMax: number;
+  /** Defaults to a required range. */
+  rule?: TournamentAgg["rankRule"];
   region: string;
 }
 
 const LIBRARY: Listing[] = [
   { name: "Ascendant Ladder Night", game: "val", format: "double", signup: "team", feeCents: 0, teamCount: 16, registered: 11, starts: [3, 20], host: "mako_tv", rankMin: 15, rankMax: 23, region: "NA East" },
   { name: "Tank Diff Tuesday", game: "ow", format: "single", signup: "solo", feeCents: 0, teamCount: 8, registered: 31, starts: [4, 19, 30], host: "sundae_ow", rankMin: 15, rankMax: 29, region: "NA" },
-  { name: "Dive Comp Showdown", game: "mr", format: "groups", signup: "team", feeCents: 3000, teamCount: 8, registered: 6, starts: [2, 18], host: "harbor_gg", rankMin: 11, rankMax: 20, region: "NA" },
+  { name: "Dive Comp Showdown", game: "mr", format: "groups", signup: "team", feeCents: 3000, teamCount: 8, registered: 6, starts: [2, 18], host: "harbor_gg", rankMin: 11, rankMax: 20, rule: "suggested", region: "NA" },
   { name: "Rift Rookies Open", game: "lol", format: "swiss", signup: "solo", feeCents: 0, teamCount: 16, registered: 54, starts: [8, 19], host: "lumen_lol", rankMin: 0, rankMax: 15, region: "NA" },
-  { name: "Payload Pals Scrim Night", game: "ow", format: "rr", signup: "team", feeCents: 1000, teamCount: 4, registered: 3, starts: [1, 22], host: "quill", rankMin: 10, rankMax: 24, region: "NA" },
-  { name: "Strategist Social", game: "mr", format: "single", signup: "solo", feeCents: 0, teamCount: 8, registered: 39, starts: [0, 23], host: "wren_plays", rankMin: 6, rankMax: 18, region: "NA" },
+  { name: "Payload Pals Scrim Night", game: "ow", format: "rr", signup: "team", feeCents: 1000, teamCount: 4, registered: 3, starts: [1, 22], host: "quill", rankMin: 0, rankMax: 35, rule: "open", region: "NA" },
+  { name: "Strategist Social", game: "mr", format: "single", signup: "solo", feeCents: 0, teamCount: 8, registered: 39, starts: [0, 23], host: "wren_plays", rankMin: 6, rankMax: 18, rule: "suggested", region: "NA" },
   { name: "Midnight Spike Rush", game: "val", format: "single", signup: "solo", feeCents: 0, teamCount: 8, registered: 22, starts: [0, 21], host: "staticc", rankMin: 6, rankMax: 14, region: "NA West" },
-  { name: "Flex Queue Refugees", game: "lol", format: "double", signup: "team", feeCents: 2500, teamCount: 16, registered: 12, starts: [9, 20], host: "orbit_esports", rankMin: 12, rankMax: 27, region: "NA" },
+  { name: "Flex Queue Refugees", game: "lol", format: "double", signup: "team", feeCents: 2500, teamCount: 16, registered: 12, starts: [9, 20], host: "orbit_esports", rankMin: 12, rankMax: 27, rule: "suggested", region: "NA" },
 ];
 
 const TEAM_NAMES = "Ultra Instinct,Pocket Healers,Sixth Sense,Wall Hackers,Clutch Factory,Rotate Left,Late Rotation,Full Send,Spawn Campers,Mid Diff,Smoke Screen,Peak Performance,Neon Tide,Snack Break,Ranked Anxiety,Quiet Storm".split(",");
@@ -270,6 +295,7 @@ function library(now: Date): TournamentAgg[] {
       teamCount: l.teamCount,
       rankMin: l.rankMin,
       rankMax: l.rankMax,
+      rankRule: l.rule ?? "required",
       signupType: l.signup,
       entryFeeCents: l.feeCents,
       format: l.format,
@@ -418,7 +444,7 @@ export function demoProfiles(all: TournamentAgg[]): Profile[] {
   };
   for (const t of byCurrency) {
     get(t.host);
-    const people = [...Object.values(t.state.teams).flatMap((x) => x.players), ...t.subs, ...t.pool];
+    const people = [...Object.values(t.state.teams).flatMap((x) => [...x.players, ...(x.bench ?? [])]), ...t.subs, ...t.pool];
     for (const pl of people) {
       const p = get(pl.handle);
       if (!p.accounts.some((a) => a.game === t.game)) p.accounts.push({ game: t.game, accountName: NAME_SUFFIX[t.game](pl.handle), rankScore: pl.score, source: pl.verified, roles: [pl.role] });

@@ -18,8 +18,20 @@ export interface GameConfig {
   tiers: string[];
   /** Division labels within a tier, lowest first. */
   divisions: string[];
-  /** One entry per seat on a team; repeated roles mean that many seats. */
+  /** One entry per seat on a team; repeated roles mean that many seats. Also the default starting lineup. */
   roles: string[];
+  /**
+   * True when a team's starters must fill exactly the seats in `roles`
+   * (Overwatch role queue, League's five positions). False when the game has
+   * no fixed composition and starters may play any role (Valorant, Marvel Rivals).
+   */
+  lockedRoles: boolean;
+  /** Roles a player can be listed as on a registered roster, starters (when not locked) and subs alike. */
+  roleOptions: string[];
+  /** Role a new substitute slot starts with. Subs can still play any role on the day. */
+  subRole: string;
+  /** Default most substitutes a team can register; hosts can change it per event. */
+  benchMax: number;
   /** Where verified ranks come from. */
   rankSource: string;
 }
@@ -32,6 +44,10 @@ export const GAMES: Record<GameId, GameConfig> = {
     tiers: ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Ascendant", "Immortal", "Radiant"],
     divisions: ["1", "2", "3"],
     roles: ["Duelist", "Initiator", "Controller", "Sentinel", "Flex"],
+    lockedRoles: false,
+    roleOptions: ["Duelist", "Initiator", "Controller", "Sentinel", "Flex"],
+    subRole: "Flex",
+    benchMax: 2,
     rankSource: "Riot API via Riot Sign On",
   },
   mr: {
@@ -41,6 +57,10 @@ export const GAMES: Record<GameId, GameConfig> = {
     tiers: ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Grandmaster", "Celestial", "Eternity", "One Above All"],
     divisions: ["III", "II", "I"],
     roles: ["Vanguard", "Vanguard", "Duelist", "Duelist", "Strategist", "Strategist"],
+    lockedRoles: false,
+    roleOptions: ["Vanguard", "Duelist", "Strategist", "Flex"],
+    subRole: "Flex",
+    benchMax: 2,
     rankSource: "Self-reported with screenshot until a data provider is signed",
   },
   ow: {
@@ -50,6 +70,10 @@ export const GAMES: Record<GameId, GameConfig> = {
     tiers: ["Bronze", "Silver", "Gold", "Platinum", "Diamond", "Master", "Grandmaster", "Champion"],
     divisions: ["5", "4", "3", "2", "1"],
     roles: ["Tank", "Damage", "Damage", "Support", "Support"],
+    lockedRoles: true,
+    roleOptions: ["Tank", "Damage", "Support", "Flex"],
+    subRole: "Flex",
+    benchMax: 3,
     rankSource: "Public career profile (Battle.net sign-in for ownership)",
   },
   lol: {
@@ -59,9 +83,16 @@ export const GAMES: Record<GameId, GameConfig> = {
     tiers: ["Iron", "Bronze", "Silver", "Gold", "Platinum", "Emerald", "Diamond", "Master", "Grandmaster", "Challenger"],
     divisions: ["IV", "III", "II", "I"],
     roles: ["Top", "Jungle", "Mid", "Bot", "Support"],
+    lockedRoles: true,
+    roleOptions: ["Top", "Jungle", "Mid", "Bot", "Support", "Fill"],
+    subRole: "Fill",
+    benchMax: 2,
     rankSource: "Riot API via Riot Sign On",
   },
 };
+
+/** Most substitutes a host can allow per team. */
+export const BENCH_LIMIT = 4;
 
 /** Overwatch 6v6 seats, used when a host picks the 6v6 preset. */
 export const OW_6V6_ROLES = ["Tank", "Tank", "Damage", "Damage", "Support", "Support"];

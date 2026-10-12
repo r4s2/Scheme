@@ -1,5 +1,5 @@
 import { OperationError, type Ctx, type Outcome, type Ticket, type TournamentAgg } from "./model";
-import { audit, begin, done, everyone, notify, requireHost, teamName } from "./operations";
+import { audit, begin, done, everyone, notify, requireHost, rosterTeamOf, teamName } from "./operations";
 
 /** Announcements from the host, and help tickets between players and the host. */
 
@@ -22,7 +22,7 @@ export function postAnnouncement(agg: TournamentAgg, ctx: Ctx, body: string, aud
 const CATEGORIES: Ticket["category"][] = ["result", "player", "rules", "schedule", "other"];
 
 export function openTicket(agg: TournamentAgg, ctx: Ctx, input: { category: string; subject: string; body: string; matchId?: string }): Outcome {
-  const teamId = Object.values(agg.state.teams).find((t) => t.players.some((p) => p.handle === ctx.actor))?.id;
+  const teamId = rosterTeamOf(agg, ctx.actor) ?? undefined;
   const inEvent = !!teamId || agg.subs.some((p) => p.handle === ctx.actor) || agg.pool.some((p) => p.handle === ctx.actor);
   if (!inEvent) throw new OperationError("Only players in this event can open a ticket.", "forbidden");
   if (!CATEGORIES.includes(input.category as Ticket["category"])) throw new OperationError("Pick what the ticket is about.");

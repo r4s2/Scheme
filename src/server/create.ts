@@ -2,6 +2,8 @@ import {
   checkCompliance,
   FORMAT_NAMES,
   GAMES,
+  BENCH_LIMIT,
+  maxScore,
   OW_6V6_ROLES,
   tierCeiling,
   tierFloor,
@@ -9,7 +11,7 @@ import {
   type FormatId,
   type GameId,
 } from "@/engine";
-import { OperationError, type Ctx, type Outcome, type Profile, type TournamentAgg } from "./model";
+import { OperationError, type Ctx, type Outcome, type Profile, type RankRule, type TournamentAgg } from "./model";
 
 /**
  * The "Host a tournament" wizard's draft, and turning it into a published
@@ -30,9 +32,13 @@ export interface Draft {
   owSixes: boolean;
   signupType: "team" | "solo";
   balanceGoal: "even" | "tiers";
-  /** Rank range as tier indexes into the game's tier list. */
+  /** No rank range, a suggested one, or a required one. */
+  rankRule: RankRule;
+  /** Rank range as tier indexes into the game's tier list. Ignored when the rule is "open". */
   rankMinTier: number;
   rankMaxTier: number;
+  /** Most substitutes each team can register (team sign-up). */
+  benchMax: number;
   minKarma: number;
   verifiedOnly: boolean;
   region: string;
@@ -64,8 +70,10 @@ export function newDraft(now: Date): Draft {
     owSixes: false,
     signupType: "solo",
     balanceGoal: "even",
+    rankRule: "open",
     rankMinTier: 3,
     rankMaxTier: 6,
+    benchMax: GAMES.mr.benchMax,
     minKarma: 60,
     verifiedOnly: true,
     region: "NA",
@@ -82,6 +90,14 @@ export function newDraft(now: Date): Draft {
   };
 }
 
+export const RANK_RULES: RankRule[] = ["open", "suggested", "required"];
+
+/** The draft's rank range as ladder scores: the whole ladder when there's no range. */
+export function draftRange(d: Pick<Draft, "game" | "rankRule" | "rankMinTier" | "rankMaxTier">): [number, number] {
+  if (d.rankRule === "open") return [0, maxScore(d.game)];
+  return [tierFloor(d.game, d.rankMinTier), tierCeiling(d.game, d.rankMaxTier)];
+}
+
 export function draftRoles(d: Pick<Draft, "game" | "owSixes">): string[] {
   return d.game === "ow" && d.owSixes ? OW_6V6_ROLES : GAMES[d.game].roles;
 }
@@ -96,8 +112,8 @@ export function draftIssues(d: Draft, hostKarma: number, now: Date): ComplianceI
     entryFeeCents: Math.round(d.entryFeeDollars * 100),
     withholdPct: d.withholdPct,
     split: d.split,
-    rankMinScore: tierFloor(d.game, d.rankMinTier),
-    rankMaxScore: tierCeiling(d.game, d.rankMaxTier),
+    rankMinScore: draftRange(d)[0],
+    rankMaxScore: draftRange(d)[1],
     participants: d.teamCount * roles.length,
     riotVisibilityFormAcknowledged: d.riotFormAck,
     hostKarma,
@@ -119,7 +135,9 @@ export function createTournament(d: Draft, ctx: Ctx, host: Profile | undefined):
   if (![1, 3, 5].includes(d.bestOf)) throw new OperationError("Series are best of 1, 3 or 5.");
   if (!SIZES.includes(d.teamCount)) throw new OperationError("Brackets hold 4, 8, 16 or 32 teams.");
   const tiers = GAMES[d.game].tiers.length;
-  if (!(d.rankMinTier >= 0 && d.rankMaxTier < tiers && d.rankMinTier <= d.rankMaxTier)) throw new OperationError("Pick a rank floor at or below the ceiling.");
+  if (!RANK_RULES.includes(d.rankRule)) throw new OperationError("Pick how the rank range works.");
+  if (!(Number.isInteger(d.benchMax) && d.benchMax >= 0 && d.benchMax <= BENCH_LIMIT)) throw new OperationError(`Teams can list 0 to ${BENCH_LIMIT} subs.`);
+  if (d.rankRule !== "open" && !(d.rankMinTier >= 0 && d.rankMaxTier < tiers && d.rankMinTier <= d.rankMaxTier)) throw new OperationError("Pick a rank floor at or below the ceiling.");
   if (!(d.minKarma >= 0 && d.minKarma <= 100)) throw new OperationError("Minimum karma is 0 to 100.");
   if (!REGIONS.includes(d.region)) throw new OperationError("Pick a region.");
   if (![30, 60, 120].includes(d.checkinMinutes)) throw new OperationError("Check-in opens 30, 60 or 120 minutes before the start.");
@@ -146,9 +164,11 @@ export function createTournament(d: Draft, ctx: Ctx, host: Profile | undefined):
     matchWindowHours: d.matchWindowHours,
     startsAt: new Date(d.startsAt).toISOString(),
     teamCount: d.teamCount,
-    rankMin: tierFloor(d.game, d.rankMinTier),
-    rankMax: tierCeiling(d.game, d.rankMaxTier),
+    rankMin: draftRange(d)[0],
+    rankMax: draftRange(d)[1],
+    rankRule: d.rankRule,
     roles,
+    benchMax: d.signupType === "team" ? d.benchMax : 0,
     requirements: { minKarma: d.minKarma, verifiedOnly: d.verifiedOnly || d.paid },
     balanceGoal: d.balanceGoal,
     checkinMinutes: d.checkinMinutes,

@@ -17,6 +17,10 @@ export interface Card {
   unit: "teams" | "players";
   startText: string;
   rankText: string;
+  /** Rank range as ladder scores; with rankRule "open" there's no range. */
+  rankMin: number;
+  rankMax: number;
+  rankRule: "open" | "suggested" | "required";
   host: string;
   hostKarma: number;
   region: string;

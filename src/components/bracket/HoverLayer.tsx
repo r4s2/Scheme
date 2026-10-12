@@ -69,12 +69,13 @@ export function HoverLayer({ teams, paused = false, children }: { teams: Record<
           </div>
           <ul className="roster">
             {t.players.map((p) => (
-              <li key={p.handle}>
+              <li key={p.handle} className={p.sub ? "sub" : undefined}>
                 <span>
                   {p.handle}
                   {p.handle === t.captain && <span className="tiny muted"> (c)</span>}
+                  {p.answer && <span className={`tiny ${p.answer === "declined" ? "picker-bad" : "picker-warn"}`}> {p.answer === "declined" ? "can't play" : "unconfirmed"}</span>}
                 </span>
-                <span className="tiny muted">{p.role}</span>
+                <span className="tiny muted">{p.sub ? `Sub · ${p.role}` : p.role}</span>
                 <span className="mono tiny">
                   {p.rank}{" "}
                   <span className={`vmark ${p.verified === "self" ? "self" : ""}`} title={p.verified === "self" ? "Self-reported rank" : "Verified rank"}>

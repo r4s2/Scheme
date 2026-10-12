@@ -1,7 +1,7 @@
 import postgres from "postgres";
-import type { FormatId, MatchResult, Player, ResultSource, Team } from "@/engine";
-import type { AuditEntry, Closure, Dispute, Effects, ExtensionRequest, Notice, Outcome, Payout, Profile, Report, Roster, TournamentAgg } from "../model";
-import { sortPeople } from "../summary";
+import type { FormatId, GameId, MatchResult, Player, ResultSource, Team } from "@/engine";
+import type { AuditEntry, Closure, Dispute, Effects, ExtensionRequest, GameAccount, Notice, Outcome, Payout, Profile, Report, Roster, TournamentAgg } from "../model";
+import { sortMatches, sortPeople } from "../summary";
 import { ConflictError, type Person, type Store, type StoredNotice, type TournamentSummary, type Win } from "./types";
 
 type Sql = postgres.Sql;
@@ -67,7 +67,7 @@ export class PostgresStore implements Store {
   async list(): Promise<TournamentSummary[]> {
     const rows = await this.sql`
       select t.id, t.name, t.game, t.status, p.handle::text as host, p.host_karma, t.format, t.signup_type, t.region,
-             t.entry_fee_cents, t.team_count, cardinality(t.roles) as team_size, t.starts_at, t.rank_min_score, t.rank_max_score,
+             t.entry_fee_cents, t.team_count, cardinality(t.roles) as team_size, t.starts_at, t.rank_min_score, t.rank_max_score, t.rank_rule,
              case when t.signup_type = 'solo'
                then (select count(*) from tournament_players tp join tournament_teams tt on tt.id = tp.tournament_team_id where tt.tournament_id = t.id)
                   + (select count(*) from tournament_entries e where e.tournament_id = t.id and e.status = 'registered')
@@ -99,6 +99,7 @@ export class PostgresStore implements Store {
       startsAt: iso(r.starts_at),
       rankMin: r.rank_min_score,
       rankMax: r.rank_max_score,
+      rankRule: r.rank_rule,
       winners: r.winners,
       players: r.players,
     }));
@@ -156,10 +157,11 @@ export class PostgresStore implements Store {
         where t.id = ${id}`,
       sql`
         select tt.id, tt.name, cp.handle as captain,
-               coalesce(json_agg(json_build_object(
+               coalesce(json_agg(json_strip_nulls(json_build_object(
                  'handle', p.handle, 'score', tp.rank_score, 'role', tp.role,
-                 'verified', tp.rank_source, 'checkedIn', tp.checked_in_at is not null, 'karma', p.player_karma
-               ) order by tp.role, p.handle) filter (where tp.profile_id is not null), '[]') as players
+                 'verified', tp.rank_source, 'checkedIn', tp.checked_in_at is not null, 'karma', p.player_karma,
+                 'confirmation', tp.confirmation, 'bench', tp.bench
+               )) order by tp.bench, tp.seat, tp.role, p.handle) filter (where tp.profile_id is not null), '[]') as players
         from tournament_teams tt
         join profiles cp on cp.id = tt.captain_id
         left join tournament_players tp on tp.tournament_team_id = tt.id
@@ -201,7 +203,11 @@ export class PostgresStore implements Store {
     if (!t) return null;
 
     const teams: Record<string, Team> = {};
-    for (const r of teamRows) teams[r.id] = { id: r.id, name: r.name, captain: r.captain, players: r.players as Player[] };
+    for (const r of teamRows) {
+      const all = r.players as (Player & { bench: boolean })[];
+      const strip = ({ bench: _, ...p }: Player & { bench: boolean }): Player => (void _, p);
+      teams[r.id] = { id: r.id, name: r.name, captain: r.captain, players: all.filter((p) => !p.bench).map(strip), bench: all.filter((p) => p.bench).map(strip) };
+    }
 
     const resultMap: Record<string, MatchResult> = {};
     for (const r of results) resultMap[r.result_key] = { winner: r.winner_team_id, w: r.w, l: r.l, by: r.source as ResultSource, matchId: r.match_id };
@@ -239,7 +245,9 @@ export class PostgresStore implements Store {
       teamCount: t.team_count,
       rankMin: t.rank_min_score,
       rankMax: t.rank_max_score,
+      rankRule: t.rank_rule,
       roles: t.roles,
+      benchMax: t.bench_max,
       requirements: { minKarma: t.min_player_karma, verifiedOnly: t.verified_ranks_only },
       balanceGoal: t.balance_goal ?? "even",
       checkinMinutes: t.checkin_minutes,
@@ -313,7 +321,10 @@ export class PostgresStore implements Store {
       const ticketsChanged = differs(prev.tickets, a.tickets);
       const payoutsChanged = differs(prev.payouts, a.payouts);
 
-      const players = Object.values(a.state.teams).flatMap((t) => t.players.map((p) => ({ team: t.id, p })));
+      const players = Object.values(a.state.teams).flatMap((t) => [
+        ...t.players.map((p, seat) => ({ team: t.id, p, bench: false, seat })),
+        ...(t.bench ?? []).map((p, seat) => ({ team: t.id, p, bench: true, seat })),
+      ]);
       const handles = new Set<string>([
         ...(teamsChanged ? [...players.map((x) => x.p.handle), ...Object.values(a.state.teams).map((t) => t.captain)] : []),
         ...(entriesChanged ? [...a.subs.map((s) => s.handle), ...a.pool.map((s) => s.handle)] : []),
@@ -353,7 +364,7 @@ export class PostgresStore implements Store {
         if (players.length) {
           const now = new Date().toISOString();
           await sql`insert into tournament_players ${sql(
-            players.map(({ team, p }) => {
+            players.map(({ team, p, bench, seat }) => {
               const id = pid(p.handle);
               const old = before.get(id);
               return {
@@ -364,6 +375,9 @@ export class PostgresStore implements Store {
                 rank_source: p.verified,
                 checked_in_at: p.checkedIn ? (old?.checked_in_at ?? now) : null,
                 is_sub: Boolean(old?.is_sub) || prev.subs.some((s) => s.handle === p.handle),
+                bench,
+                seat,
+                confirmation: p.confirmation ?? null,
               };
             }),
           )}`;
@@ -476,12 +490,13 @@ export class PostgresStore implements Store {
     await this.sql`
       insert into tournaments (id, host_id, name, game, format, best_of, signup_type, balance_goal, status, region, team_count, roles,
                                rank_min_score, rank_max_score, min_player_karma, verified_ranks_only, starts_at, checkin_minutes,
-                               match_window_hours, allow_extensions, house_rules, entry_fee_cents, withhold_pct, payout_split, version)
+                               match_window_hours, allow_extensions, house_rules, entry_fee_cents, withhold_pct, payout_split, version,
+                               rank_rule, bench_max)
       values (${agg.id}, ${host.id}, ${agg.name}, ${agg.game}, ${agg.state.format}, ${agg.state.bestOf}, ${agg.signupType},
               ${agg.signupType === "solo" ? agg.balanceGoal : null}, 'draft', ${agg.region}, ${agg.teamCount}, ${this.sql.array(agg.roles)},
               ${agg.rankMin}, ${agg.rankMax}, ${agg.requirements.minKarma}, ${agg.requirements.verifiedOnly}, ${agg.startsAt}, ${agg.checkinMinutes},
               ${agg.matchWindowHours}, ${agg.allowExtensions}, ${this.sql.array(agg.houseRules)}, ${agg.entryFeeCents}, ${agg.withholdPct},
-              ${this.sql.array(agg.payoutSplit)}::int[], 0)`;
+              ${this.sql.array(agg.payoutSplit)}::int[], 0, ${agg.rankRule}, ${agg.benchMax})`;
     // The rest (status, teams, notices, audit) goes through the normal save from an empty draft.
     return this.commit({ ...agg, version: 0, status: "draft", state: { ...agg.state, teams: {}, slots: [], results: {} }, pool: [], subs: [], announcements: [], tickets: [] }, { agg, effects });
   }
@@ -515,6 +530,38 @@ export class PostgresStore implements Store {
 
   async directory(): Promise<Profile[]> {
     return (await this.profileRows(this.sql`true`)).sort((a, b) => a.handle.localeCompare(b.handle));
+  }
+
+  async searchProfiles(query: string, limit: number): Promise<Profile[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = await this.profileRows(
+      this.sql`p.id in (
+        select x.id from profiles x
+        where lower(x.handle) like ${like}
+           or exists (select 1 from game_accounts ga where ga.profile_id = x.id and lower(ga.account_name) like ${like})
+        order by (lower(x.handle) = ${q}) desc, (lower(x.handle) like ${q.replace(/[\\%_]/g, (c) => `\\${c}`) + "%"}) desc, lower(x.handle)
+        limit ${limit})`,
+    );
+    return sortMatches(rows, q).slice(0, limit);
+  }
+
+  async saveGameAccount(handle: string, a: GameAccount): Promise<void> {
+    await this.sql`
+      insert into game_accounts (profile_id, game, external_id, account_name, rank_score, roles, rank_source)
+      select p.id, ${a.game}, 'self:' || p.id::text, ${a.accountName}, ${a.rankScore}, ${this.sql.array(a.roles)}::text[], 'self'
+      from profiles p where lower(p.handle) = ${handle.toLowerCase()}
+      on conflict (profile_id, game) do update set
+        roles = excluded.roles,
+        -- Verified accounts keep the name and rank their publisher reports.
+        account_name = case when game_accounts.rank_source = 'api' then game_accounts.account_name else excluded.account_name end,
+        rank_score = case when game_accounts.rank_source = 'api' then game_accounts.rank_score else excluded.rank_score end,
+        last_read_at = now()`;
+  }
+
+  async removeGameAccount(handle: string, game: GameId): Promise<void> {
+    await this.sql`delete from game_accounts where game = ${game} and profile_id = (select id from profiles where lower(handle) = ${handle.toLowerCase()})`;
   }
 
   async setLookingForTeam(handle: string, on: boolean): Promise<void> {

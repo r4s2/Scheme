@@ -1,6 +1,28 @@
-import { GAMES, type GameId } from "@/engine";
-import type { TournamentAgg } from "./model";
+import { GAMES, type GameId, type Team } from "@/engine";
+import type { Profile, TournamentAgg } from "./model";
 import type { Person, TournamentSummary, Win } from "./store/types";
+
+const fullRoster = (t: Team) => [...t.players, ...(t.bench ?? [])];
+
+/**
+ * Order player search results: exact handle, then handles starting with the
+ * query, then the rest (matches inside a handle or a game account name), each
+ * alphabetically.
+ */
+export function sortMatches(profiles: Profile[], query: string): Profile[] {
+  const q = query.trim().toLowerCase();
+  const score = (p: Profile) => {
+    const h = p.handle.toLowerCase();
+    return h === q ? 0 : h.startsWith(q) ? 1 : h.includes(q) ? 2 : 3;
+  };
+  return [...profiles].sort((a, b) => score(a) - score(b) || a.handle.toLowerCase().localeCompare(b.handle.toLowerCase()));
+}
+
+/** Whether a profile matches a player search: handle or any linked account name contains the query. */
+export function matchesQuery(p: Profile, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !!q && (p.handle.toLowerCase().includes(q) || p.accounts.some((a) => a.accountName.toLowerCase().includes(q)));
+}
 
 /** Library card data for one tournament. Used by the in-memory store; Postgres computes the same in SQL. */
 export function summarize(t: TournamentAgg, hostKarma: number): TournamentSummary {
@@ -24,7 +46,8 @@ export function summarize(t: TournamentAgg, hostKarma: number): TournamentSummar
     rankMin: t.rankMin,
     rankMax: t.rankMax,
     winners: t.status === "complete" && t.closure ? (t.closure.places[0] ?? []).map((id) => t.state.teams[id]?.name ?? id) : [],
-    players: [...new Set([...teams.flatMap((team) => team.players.map((p) => p.handle)), ...t.subs.map((p) => p.handle), ...t.pool.map((p) => p.handle)])],
+    rankRule: t.rankRule,
+    players: [...new Set([...teams.flatMap((team) => fullRoster(team).map((p) => p.handle)), ...t.subs.map((p) => p.handle), ...t.pool.map((p) => p.handle)])],
   };
 }
 
@@ -32,7 +55,8 @@ export function winsOf(t: TournamentAgg): Win[] {
   if (t.status !== "complete" || !t.closure) return [];
   return (t.closure.places[0] ?? []).flatMap((id) => {
     const team = t.state.teams[id];
-    return team ? [{ tournamentId: t.id, game: t.game, team: team.name, players: team.players.map((p) => p.handle), at: t.closure!.at }] : [];
+    // The whole registered roster shares the win, subs included.
+    return team ? [{ tournamentId: t.id, game: t.game, team: team.name, players: fullRoster(team).map((p) => p.handle), at: t.closure!.at }] : [];
   });
 }
 
@@ -47,7 +71,7 @@ export function peopleOf(all: TournamentAgg[]): Person[] {
     if (t.status === "complete" || t.status === "cancelled") continue;
     get(t.host).host = true;
     for (const team of Object.values(t.state.teams)) {
-      for (const pl of team.players) {
+      for (const pl of fullRoster(team)) {
         const p = get(pl.handle);
         if (!p.teams.some((x) => x.name === team.name)) p.teams.push({ name: team.name, captain: team.captain === pl.handle });
       }

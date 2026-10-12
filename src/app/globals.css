@@ -528,3 +528,36 @@ form[data-pending] button { opacity: 0.6; pointer-events: none; }
 @media (max-width: 860px) { .wiz-rail { position: static; } }
 .wiz-section { scroll-margin-top: 84px; }
 .wiz-section + .wiz-section { border-top: 1px solid var(--line); margin-top: 26px; padding-top: 22px; }
+
+/* Player search box */
+.picker { position: relative; display: inline-block; min-width: 0; }
+.picker input { width: 100%; }
+.picker-list { position: fixed; z-index: 70; list-style: none; margin: 0; padding: 4px; max-height: 320px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.picker-opt { display: flex; flex-direction: column; gap: 1px; padding: 7px 9px; border-radius: 7px; cursor: pointer; }
+.picker-opt.active { background: var(--accent-soft); }
+.picker-opt.dim { opacity: 0.5; cursor: default; }
+.picker-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; }
+.picker-empty { padding: 9px; color: var(--muted); font-size: 13px; }
+.picker-bad { color: var(--bad); }
+.picker-warn { color: var(--warn); }
+
+/* Rosters */
+.roster-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.roster-tbl { table-layout: fixed; }
+.roster-tbl th:first-child { width: 150px; }
+.roster-tbl th:nth-child(3) { width: 34%; }
+.roster-tbl th:nth-child(4) { width: 92px; }
+.roster-tbl select { width: 100%; }
+.role-lock { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.role-lock svg { width: 13px; height: 13px; color: var(--muted); }
+.roster-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13.5px; }
+.roster-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
+.roster-list li:first-child { border-top: 0; }
+.roster-list .sub-h { display: block; padding-top: 10px; border-top: 0; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.hovercard .roster li.sub { opacity: 0.8; }
+
+/* Game pool editing */
+.gform { display: grid; gap: 10px; }
+.gform .roles { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.gform .roles label { display: inline-flex; gap: 5px; align-items: center; font-size: 13.5px; }
+.roster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }

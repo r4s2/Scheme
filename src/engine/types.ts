@@ -23,6 +23,11 @@ export interface Player {
   checkedIn: boolean;
   /** Player karma (0–100), when the store knows it. Display only. */
   karma?: number;
+  /**
+   * On a team a captain registered: whether the player has answered. Absent
+   * means confirmed (captains, balanced solo teams, older records).
+   */
+  confirmation?: "pending" | "declined";
 }
 
 export interface Team {
@@ -30,7 +35,13 @@ export interface Team {
   id: string;
   name: string;
   captain: string;
+  /** The starters. Everything the engine computes (ranks, check-in, prize shares) uses these. */
   players: Player[];
+  /**
+   * Substitutes registered with the team. Display only, so hosts and
+   * opponents can check who's on the roster against a result screenshot.
+   */
+  bench?: Player[];
 }
 
 export type ResultSource = "reports" | "host" | "auto" | "dispute" | "forfeit";

@@ -52,6 +52,7 @@ export function Checkin({ agg }: { agg: TournamentAgg }) {
                     <td>
                       {p.handle}
                       {p.handle === t.captain && <span className={ui.muted}> (c)</span>}
+                      {p.confirmation && <span className={`${ui.small} ${p.confirmation === "declined" ? "picker-bad" : "picker-warn"}`}> {p.confirmation === "declined" ? "can't play" : "unconfirmed"}</span>}
                     </td>
                     <td className={ui.small}>
                       {p.role} · {rankName(agg.game, p.score)}
@@ -87,6 +88,11 @@ export function Checkin({ agg }: { agg: TournamentAgg }) {
                 ))}
               </tbody>
             </table>
+            {t.bench && t.bench.length > 0 && (
+              <p className={`${ui.small} ${ui.muted}`} style={{ marginTop: 8 }}>
+                Subs on the roster: {t.bench.map((p) => `${p.handle} (${p.role})`).join(", ")}
+              </p>
+            )}
           </div>
         ))}
       </div>

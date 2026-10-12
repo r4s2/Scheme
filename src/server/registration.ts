@@ -1,5 +1,5 @@
 import { balanceTeams, GAMES, rankName, roleCounts, seedSlots, type Player, type Team } from "@/engine";
-import { OperationError, type Ctx, type Outcome, type Profile, type TournamentAgg } from "./model";
+import { OperationError, type Ctx, type Effects, type Outcome, type Profile, type TournamentAgg } from "./model";
 import { audit, begin, done, notify, requireHost } from "./operations";
 
 /**
@@ -12,10 +12,15 @@ const SOLO_TEAM_NAMES = "Aurora Basalt Cinder Drift Echo Flint Gale Harbor Indig
 
 const lower = (h: string) => h.toLowerCase();
 
-/** Everyone already in the tournament: on a team, waiting as a sub, or signed up solo. */
-function entrants(agg: TournamentAgg): Set<string> {
+/** Starters and substitutes on a team. */
+export const fullRoster = (t: Team): Player[] => [...t.players, ...(t.bench ?? [])];
+
+/** Everyone already in the tournament: on a team (starting or as a sub), waiting as a free-agent sub, or signed up solo. */
+function entrants(agg: TournamentAgg, exceptTeam?: string): Set<string> {
   return new Set([
-    ...Object.values(agg.state.teams).flatMap((t) => t.players.map((p) => lower(p.handle))),
+    ...Object.values(agg.state.teams)
+      .filter((t) => t.id !== exceptTeam)
+      .flatMap((t) => fullRoster(t).map((p) => lower(p.handle))),
     ...agg.subs.map((p) => lower(p.handle)),
     ...agg.pool.map((p) => lower(p.handle)),
   ]);
@@ -31,22 +36,38 @@ export function registeredCount(agg: TournamentAgg): number {
   return agg.signupType === "solo" ? teams.reduce((n, t) => n + t.players.length, 0) + agg.pool.length : teams.length;
 }
 
+/** "Gold 1 to Diamond 3", or null when the event has no rank range. */
+export function rangeText(agg: Pick<TournamentAgg, "game" | "rankMin" | "rankMax" | "rankRule">): string | null {
+  return agg.rankRule === "open" ? null : `${rankName(agg.game, agg.rankMin)} to ${rankName(agg.game, agg.rankMax)}`;
+}
+
 /**
  * Why a player can't enter this event, or null if they can. Checks their
- * linked account for the game, rank range, verification and karma.
+ * linked account for the game, rank range (when the host requires it),
+ * verification and karma.
  */
-export function ineligibility(agg: TournamentAgg, profile: Profile | undefined, handle: string): string | null {
+export type EligibilityRules = Pick<TournamentAgg, "game" | "rankRule" | "rankMin" | "rankMax" | "requirements">;
+
+export function ineligibility(agg: EligibilityRules, profile: Profile | undefined, handle: string): string | null {
   if (!profile) return `${handle} doesn't have a Scheme profile.`;
   const game = GAMES[agg.game];
   const acct = profile.accounts.find((a) => a.game === agg.game);
   if (!acct) return `${profile.handle} hasn't linked a ${game.name} account.`;
-  if (acct.rankScore < agg.rankMin || acct.rankScore > agg.rankMax) {
-    return `${profile.handle} is ${rankName(agg.game, acct.rankScore)}; this event is for ${rankName(agg.game, agg.rankMin)} to ${rankName(agg.game, agg.rankMax)}.`;
+  if (agg.rankRule === "required" && (acct.rankScore < agg.rankMin || acct.rankScore > agg.rankMax)) {
+    return `${profile.handle} is ${rankName(agg.game, acct.rankScore)}; this event is for ${rangeText(agg)}.`;
   }
   // Marvel Rivals ranks are self-reported until a data provider is signed, so verification can't be required there yet.
   if (agg.requirements.verifiedOnly && acct.source !== "api" && agg.game !== "mr") return `${profile.handle}'s ${game.name} rank isn't verified yet.`;
   if (profile.playerKarma < agg.requirements.minKarma) return `${profile.handle}'s karma is ${profile.playerKarma}; this event needs ${agg.requirements.minKarma}.`;
   return null;
+}
+
+/** For a suggested range: a heads-up when a player is outside it. They can still sign up. */
+export function rankNote(agg: EligibilityRules, profile: Profile | undefined): string | null {
+  if (agg.rankRule !== "suggested" || !profile) return null;
+  const acct = profile.accounts.find((a) => a.game === agg.game);
+  if (!acct || (acct.rankScore >= agg.rankMin && acct.rankScore <= agg.rankMax)) return null;
+  return `Outside the suggested ${rangeText(agg)}`;
 }
 
 function requireRegistration(agg: TournamentAgg, signup: "team" | "solo") {
@@ -61,49 +82,172 @@ function asPlayer(profile: Profile, game: TournamentAgg["game"], role: string): 
   return { handle: profile.handle, score: acct.rankScore, role, verified: acct.source, checkedIn: false, karma: profile.playerKarma };
 }
 
-export interface TeamEntry {
-  name: string;
-  players: { handle: string; role: string }[];
+export interface RosterSpot {
+  handle: string;
+  role: string;
 }
 
-/** A captain registers a full team. The captain must be one of the players. */
-export function registerTeam(agg: TournamentAgg, ctx: Ctx, entry: TeamEntry, profiles: Profile[]): Outcome {
-  requireRegistration(agg, "team");
-  const teams = Object.values(agg.state.teams);
-  if (teams.length >= agg.teamCount) throw new OperationError("This event is full.", "conflict");
+export interface TeamEntry {
+  name: string;
+  /** Starters, one per seat in the event's lineup. */
+  players: RosterSpot[];
+  /** Substitutes on top of the starters, up to the event's limit. */
+  bench?: RosterSpot[];
+}
+
+/**
+ * Every check a roster has to pass, for registering a team or editing one:
+ * name, a full starting lineup with the right roles, subs within the limit,
+ * no one listed twice or already in the event, and every player eligible.
+ */
+function checkRoster(agg: TournamentAgg, actor: string, entry: TeamEntry, profiles: Profile[], teamId?: string) {
+  const G = GAMES[agg.game];
+  const teams = Object.values(agg.state.teams).filter((t) => t.id !== teamId);
   const name = entry.name.trim().replace(/\s+/g, " ");
   if (name.length < 2 || name.length > 40) throw new OperationError("Team names are 2 to 40 characters.");
   if (teams.some((t) => lower(t.name) === lower(name))) throw new OperationError(`A team called ${name} is already registered.`, "conflict");
 
   const seats = entry.players.map((p) => ({ handle: p.handle.trim(), role: p.role }));
-  if (seats.length !== agg.roles.length) throw new OperationError(`Teams in this event have ${agg.roles.length} players.`);
-  if (seats.some((p) => !p.handle)) throw new OperationError("Fill every seat on the team.");
-  if (new Set(seats.map((p) => lower(p.handle))).size !== seats.length) throw new OperationError("The same player is listed twice.");
-  if (!seats.some((p) => lower(p.handle) === lower(ctx.actor))) throw new OperationError("Captains play on the team they register. Add yourself to the roster.");
-  const need = roleCounts(agg.roles);
-  const have = roleCounts(seats.map((p) => p.role));
-  for (const role of new Set([...Object.keys(need), ...Object.keys(have)])) {
-    if ((need[role] ?? 0) !== (have[role] ?? 0)) {
-      throw new OperationError(`This event's teams are ${Object.entries(need).map(([r, n]) => `${n} ${r}`).join(", ")}. Check the roles.`);
+  const bench = (entry.bench ?? []).map((p) => ({ handle: p.handle.trim(), role: p.role }));
+  if (seats.length !== agg.roles.length) throw new OperationError(`Teams in this event start ${agg.roles.length} players.`);
+  if (seats.some((p) => !p.handle)) throw new OperationError("Fill every starting spot on the team.");
+  if (bench.length > agg.benchMax) throw new OperationError(agg.benchMax ? `Teams in this event can list up to ${agg.benchMax} sub${agg.benchMax === 1 ? "" : "s"}.` : "This event doesn't take subs.");
+  if (bench.some((p) => !p.handle)) throw new OperationError("Fill in or remove each empty sub slot.");
+  const all = [...seats, ...bench];
+  if (new Set(all.map((p) => lower(p.handle))).size !== all.length) throw new OperationError("The same player is listed twice.");
+  if (!seats.some((p) => lower(p.handle) === lower(actor))) throw new OperationError("Captains play on the team they register. Add yourself to the starting lineup.");
+
+  if (G.lockedRoles) {
+    const need = roleCounts(agg.roles);
+    const have = roleCounts(seats.map((p) => p.role));
+    for (const role of new Set([...Object.keys(need), ...Object.keys(have)])) {
+      if ((need[role] ?? 0) !== (have[role] ?? 0)) {
+        throw new OperationError(`This event's starting lineups are ${Object.entries(need).map(([r, n]) => `${n} ${r}`).join(", ")}. Check the roles.`);
+      }
     }
+  } else if (seats.some((p) => !G.roleOptions.includes(p.role))) {
+    throw new OperationError(`Pick a role for every starter: ${G.roleOptions.join(", ")}.`);
   }
-  const taken = entrants(agg);
+  if (bench.some((p) => !G.roleOptions.includes(p.role))) throw new OperationError(`Pick a role for every sub: ${G.roleOptions.join(", ")}.`);
+
+  const taken = entrants(agg, teamId);
   const byHandle = new Map(profiles.map((p) => [lower(p.handle), p]));
-  for (const s of seats) {
+  for (const s of all) {
     if (taken.has(lower(s.handle))) throw new OperationError(`${s.handle} is already in this event.`, "conflict");
     const why = ineligibility(agg, byHandle.get(lower(s.handle)), s.handle);
     if (why) throw new OperationError(why, "conflict");
   }
+  const profileOf = (h: string) => byHandle.get(lower(h))!;
+  return { name, seats, bench, profileOf };
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * A captain registers a team: the starting lineup plus any subs. Everyone
+ * the captain listed gets a notification to confirm they're playing.
+ */
+export function registerTeam(agg: TournamentAgg, ctx: Ctx, entry: TeamEntry, profiles: Profile[]): Outcome {
+  requireRegistration(agg, "team");
+  const teams = Object.values(agg.state.teams);
+  if (teams.length >= agg.teamCount) throw new OperationError("This event is full.", "conflict");
+  const { name, seats, bench, profileOf } = checkRoster(agg, ctx.actor, entry, profiles);
 
   const { next, effects } = begin(agg);
-  const captain = byHandle.get(lower(ctx.actor))!.handle;
-  const team: Team = { id: ctx.newId(), name, captain, players: seats.map((s) => asPlayer(byHandle.get(lower(s.handle))!, agg.game, s.role)) };
+  const captain = profileOf(ctx.actor).handle;
+  const make = (s: RosterSpot): Player => {
+    const p = asPlayer(profileOf(s.handle), agg.game, s.role);
+    return p.handle === captain ? p : { ...p, confirmation: "pending" };
+  };
+  const team: Team = { id: ctx.newId(), name, captain, players: seats.map(make), bench: bench.map(make) };
   next.state = { ...agg.state, teams: { ...agg.state.teams, [team.id]: team }, slots: [...agg.state.slots, team.id] };
   const left = agg.teamCount - teams.length - 1;
-  audit(effects, ctx, "registration.team", `Registered ${name}.`);
-  notify(effects, next, team.players.map((p) => p.handle).filter((h) => h !== captain), "registration", `${captain} registered you for ${agg.name} with ${name}.`);
+  audit(effects, ctx, "registration.team", `Registered ${name}${team.bench!.length ? ` with ${plural(team.bench!.length, "sub")}` : ""}.`);
+  askToConfirm(effects, next, captain, name, team.players, team.bench!);
   notify(effects, next, [agg.host], "registration", `${name} registered for ${agg.name} (${teams.length + 1} of ${agg.teamCount} teams).`);
-  return done(next, effects, `${name} is registered. ${left ? `${left} spot${left === 1 ? "" : "s"} left.` : "The event is full."}`);
+  const asked = fullRoster(team).filter((p) => p.confirmation).length;
+  return done(
+    next,
+    effects,
+    `${name} is registered. ${left ? `${left} spot${left === 1 ? "" : "s"} left.` : "The event is full."}${asked ? ` ${plural(asked, "teammate")} will get a notification to confirm.` : ""}`,
+  );
+}
+
+function askToConfirm(effects: Effects, agg: TournamentAgg, captain: string, team: string, starters: Player[], bench: Player[]) {
+  const ask = (ps: Player[], as: string) =>
+    notify(effects, agg, ps.filter((p) => p.confirmation === "pending").map((p) => p.handle), "roster_confirm", `${captain} added you to ${team} for ${agg.name} ${as}. Confirm you're playing.`);
+  ask(starters, "as a starter");
+  ask(bench, "as a sub");
+}
+
+/**
+ * The captain changes their registered roster while registration is open:
+ * swap players, change roles, add or remove subs, or rename the team.
+ * Players who stay keep their confirmation; new players are asked to confirm.
+ */
+export function updateRoster(agg: TournamentAgg, ctx: Ctx, teamId: string, entry: TeamEntry, profiles: Profile[]): Outcome {
+  requireRegistration(agg, "team");
+  const team = agg.state.teams[teamId];
+  if (!team) throw new OperationError("That team isn't registered.", "not_found");
+  if (team.captain !== ctx.actor) throw new OperationError("Only the captain can change the roster.", "forbidden");
+  const { name, seats, bench, profileOf } = checkRoster(agg, ctx.actor, entry, profiles, teamId);
+
+  const before = new Map(fullRoster(team).map((p) => [lower(p.handle), p]));
+  const make = (s: RosterSpot): Player => {
+    const p = asPlayer(profileOf(s.handle), agg.game, s.role);
+    const old = before.get(lower(s.handle));
+    if (p.handle === team.captain) return p;
+    return old ? (old.confirmation ? { ...p, confirmation: old.confirmation } : p) : { ...p, confirmation: "pending" };
+  };
+  const updated: Team = { ...team, name, players: seats.map(make), bench: bench.map(make) };
+  const nowOn = new Set(fullRoster(updated).map((p) => lower(p.handle)));
+  const removed = fullRoster(team).filter((p) => !nowOn.has(lower(p.handle)));
+  const added = fullRoster(updated).filter((p) => !before.has(lower(p.handle)));
+
+  const { next, effects } = begin(agg);
+  next.state = { ...agg.state, teams: { ...agg.state.teams, [teamId]: updated } };
+  const changes = [
+    name !== team.name ? `renamed to ${name}` : "",
+    added.length ? `added ${added.map((p) => p.handle).join(", ")}` : "",
+    removed.length ? `removed ${removed.map((p) => p.handle).join(", ")}` : "",
+  ].filter(Boolean);
+  audit(effects, ctx, "registration.roster", `${team.name}: ${changes.join("; ") || "changed roles"}.`);
+  const isNew = new Set(added.map((p) => lower(p.handle)));
+  askToConfirm(effects, next, team.captain, name, updated.players.filter((p) => isNew.has(lower(p.handle))), updated.bench!.filter((p) => isNew.has(lower(p.handle))));
+  notify(effects, next, removed.map((p) => p.handle), "registration", `${team.captain} took you off ${team.name}'s roster for ${agg.name}.`);
+  return done(next, effects, `Roster saved.${added.length ? ` ${plural(added.length, "new player")} will get a notification to confirm.` : ""}`);
+}
+
+/** A player listed on a team answers the captain: playing, or can't make it. */
+export function respondToRoster(agg: TournamentAgg, ctx: Ctx, accept: boolean): Outcome {
+  if (agg.status !== "registration" && agg.status !== "checkin") throw new OperationError("This event has already started.", "conflict");
+  const me = lower(ctx.actor);
+  const team = Object.values(agg.state.teams).find((t) => fullRoster(t).some((p) => lower(p.handle) === me));
+  const spot = team && fullRoster(team).find((p) => lower(p.handle) === me);
+  if (!team || !spot) throw new OperationError("You aren't on a team in this event.", "not_found");
+  if (!spot.confirmation) throw new OperationError(`You've already confirmed for ${team.name}.`, "conflict");
+  if (!accept && spot.confirmation === "declined") throw new OperationError("You've already said you can't play.", "conflict");
+
+  const { next, effects } = begin(agg);
+  const answer = (p: Player): Player => {
+    if (lower(p.handle) !== me) return p;
+    if (accept) {
+      const { confirmation: _, ...rest } = p;
+      void _;
+      return rest;
+    }
+    return { ...p, confirmation: "declined" };
+  };
+  next.state = { ...agg.state, teams: { ...agg.state.teams, [team.id]: { ...team, players: team.players.map(answer), bench: team.bench?.map(answer) } } };
+  audit(effects, ctx, accept ? "registration.confirm" : "registration.decline", `${spot.handle} ${accept ? "confirmed for" : "can't play for"} ${team.name}.`);
+  notify(
+    effects,
+    next,
+    [team.captain],
+    "registration",
+    accept ? `${spot.handle} confirmed they're playing for ${team.name} in ${agg.name}.` : `${spot.handle} can't play for ${team.name} in ${agg.name}. Edit your roster to replace them.`,
+  );
+  return done(next, effects, accept ? `You're confirmed for ${team.name}.` : `Got it. ${team.captain} has been told you can't play.`);
 }
 
 /** A captain withdraws their team, or the host removes one, while registration is open. */
@@ -118,7 +262,7 @@ export function withdrawTeam(agg: TournamentAgg, ctx: Ctx, teamId: string): Outc
   delete teams[teamId];
   next.state = { ...agg.state, teams, slots: agg.state.slots.filter((s) => s !== teamId) };
   audit(effects, ctx, "registration.withdraw", `${isHost ? "Removed" : "Withdrew"} ${team.name}.`);
-  notify(effects, next, team.players.map((p) => p.handle).filter((h) => h !== ctx.actor), "registration", `${team.name} ${isHost ? "was removed from" : "withdrew from"} ${agg.name}.`);
+  notify(effects, next, fullRoster(team).map((p) => p.handle).filter((h) => h !== ctx.actor), "registration", `${team.name} ${isHost ? "was removed from" : "withdrew from"} ${agg.name}.`);
   return done(next, effects, `${team.name} ${isHost ? "was removed" : "withdrew"}.`);
 }
 
