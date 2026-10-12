@@ -44,8 +44,8 @@ Demo data resets when the server restarts.
 ## With a database
 
 1. Create a Supabase project, or run one locally with the [Supabase CLI](https://supabase.com/docs/guides/local-development) (`supabase start`, which needs Docker).
-2. Apply the schema and sample data: `supabase db reset` locally, or `supabase link` then `supabase db push` for a hosted project. Only seed development projects.
-3. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to the project's connection string. For Supabase, use a pooler string from **Connect** (Session pooler, or Transaction pooler on port 6543); the direct `db.<project>.supabase.co` address only works on IPv6 networks. Supabase connections are always encrypted.
+2. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to the project's connection string. For Supabase, use a pooler string from **Connect** (Session pooler, or Transaction pooler on port 6543); the direct `db.<project>.supabase.co` address only works on IPv6 networks. Supabase connections are always encrypted.
+3. Run `npm run db:setup`. It applies any schema changes the database doesn't have yet and loads the sample data, and it's safe to run again. Use `npm run db:setup -- --no-seed` for a project that shouldn't get sample data. (With a local Supabase, `supabase db reset` does the same.)
 
 In development, if the database can't be reached (for example, guest Wi-Fi that blocks database traffic), the app shows a notice and runs on demo data, then switches back on its own once the database answers. Changes to `.env.local` apply without restarting. Production never falls back: a missing database is an error.
 

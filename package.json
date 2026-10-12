@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "db:setup": "node scripts/db-setup.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",

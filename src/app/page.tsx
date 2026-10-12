@@ -25,6 +25,14 @@ export default async function Home() {
           ? "Live data from the database."
           : "Demo data, kept in memory until the server restarts. Use “Acting as” at the top to be the host or any player."}
       </p>
+      {list.length === 0 && (
+        <div className={ui.card} style={{ marginTop: 16 }}>
+          <h3 style={{ fontSize: 18 }}>No tournaments yet</h3>
+          <p className={ui.muted} style={{ marginTop: 6 }}>
+            The database is connected but empty. To load the sample tournament, run <code>npm run db:setup</code> in the project folder, then reload this page.
+          </p>
+        </div>
+      )}
       <div className={ui.grid2}>
         {list.map((t) => (
           <Link key={t.id} href={`/t/${t.id}`} className={ui.card} style={{ textDecoration: "none", color: "inherit" }}>
