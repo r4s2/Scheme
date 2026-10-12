@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { buildBracket } from "@/engine";
-import { DEMO_HOST_KARMA, demoTournaments } from "../demo-data";
+import { demoProfiles, demoRosters, demoTournaments } from "../demo-data";
 import type { TournamentAgg } from "../model";
 import { MemoryStore } from "../store/memory";
 import { PostgresStore } from "../store/postgres";
@@ -20,7 +20,7 @@ const MUTATED = "Friday Night Spike";
 describe.skipIf(!url)("seed.sql matches demo mode", () => {
   const sql = postgres(url ?? "postgres://unused", { max: 2 });
   const db = new PostgresStore(sql);
-  const mem = new MemoryStore(demoTournaments(new Date()), DEMO_HOST_KARMA);
+  const mem = new MemoryStore(demoTournaments(new Date()), demoProfiles(demoTournaments(new Date())), demoRosters());
   afterAll(() => sql.end());
 
   const byName = <T extends { name: string }>(xs: T[]) => new Map(xs.map((x) => [x.name, x]));
@@ -49,6 +49,26 @@ describe.skipIf(!url)("seed.sql matches demo mode", () => {
   it("has the same winners for the leaderboards", async () => {
     const view = (ws: { game: string; team: string; players: string[] }[]) => ws.map((w) => `${w.game}:${w.team}:${[...w.players].sort().join(",")}`).sort();
     expect(view(await db.wins())).toEqual(view(await mem.wins()));
+  });
+
+  it("has the same profiles, accounts and saved teams", async () => {
+    const all = demoTournaments(new Date());
+    const handles = demoProfiles(all).map((p) => p.handle);
+    expect(await db.profiles(handles)).toEqual(await mem.profiles(handles));
+    for (const h of ["glint", "kestrel", "zorra", "ember"]) {
+      const strip = (rs: Awaited<ReturnType<typeof db.rosters>>) => rs.map(({ id, ...r }) => (void id, { ...r, members: [...r.members].sort((a, b) => a.handle.localeCompare(b.handle)) }));
+      expect(strip(await db.rosters(h)), h).toEqual(strip(await mem.rosters(h)));
+    }
+  });
+
+  it("has the same announcements and tickets", async () => {
+    const fns = (await db.list()).find((t) => t.name === MUTATED)!;
+    const [x, y] = [(await db.get(fns.id))!, (await mem.get("friday-night-spike"))!];
+    const view = (t: TournamentAgg) => ({
+      a: t.announcements.map((a) => [a.audience, a.body, a.sentBy]),
+      k: t.tickets.map((k) => [k.openedBy, nameOf(t, k.teamId ?? null), k.matchId, k.category, k.subject, k.status, k.messages.map((m) => [m.author, m.body])]),
+    });
+    expect(view(x)).toEqual(view(y));
   });
 
   it("has the same people for the Acting as switcher", async () => {

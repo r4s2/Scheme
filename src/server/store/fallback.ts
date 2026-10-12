@@ -1,4 +1,4 @@
-import type { AuditEntry, Outcome, TournamentAgg } from "../model";
+import type { AuditEntry, Effects, Notice, Outcome, Profile, Roster, TournamentAgg } from "../model";
 import type { Person, Store, StoredNotice, TournamentSummary, Win } from "./types";
 
 /** Error codes that mean "couldn't reach the database", as opposed to a query the database rejected. */
@@ -118,6 +118,42 @@ export class FallbackStore implements Store {
 
   list(): Promise<TournamentSummary[]> {
     return this.read((s) => s.list());
+  }
+
+  profiles(handles: string[]): Promise<Profile[]> {
+    return this.read((s) => s.profiles(handles));
+  }
+
+  rosters(handle: string): Promise<Roster[]> {
+    return this.read((s) => s.rosters(handle));
+  }
+
+  roster(id: string): Promise<Roster | null> {
+    return this.read((s) => s.roster(id));
+  }
+
+  /** Writes outside a tournament go wherever reads currently go; a dropped connection fails rather than switching. */
+  private async write<T>(run: (s: Store) => Promise<T>): Promise<T> {
+    const s = await this.pick();
+    try {
+      return await run(s);
+    } catch (e) {
+      if (s !== this.db || !isConnectionError(e)) throw e;
+      this.markDown(e);
+      throw new DatabaseUnavailableError();
+    }
+  }
+
+  notify(notices: Notice[]): Promise<void> {
+    return this.write((s) => s.notify(notices));
+  }
+
+  saveRoster(roster: Roster): Promise<Roster> {
+    return this.write((s) => s.saveRoster(roster));
+  }
+
+  create(agg: TournamentAgg, effects: Effects): Promise<TournamentAgg> {
+    return this.write(async (s) => this.tag(await s.create(agg, effects), s));
   }
 
   wins(): Promise<Win[]> {

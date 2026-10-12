@@ -54,7 +54,7 @@ export function Ticker({ boards, missing }: { boards: Board[]; missing: string[]
             ))}
           </div>
           <div className="lb-anim" key={`${b.key}-${cycle}`}>
-            <BoardList rows={b.rows} limit={5} />
+            <BoardList rows={b.rows} limit={5} players={b.kind === "player"} />
           </div>
           <div className="progress" key={`p-${b.key}-${cycle}`}>
             <span />

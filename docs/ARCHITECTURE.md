@@ -30,7 +30,9 @@ form (server action) → store.get(id) → operation(agg, ctx, request) → stor
 | `engine/schedule.ts` | Wave deadlines, extensions, match status, auto-confirm and payout release times. |
 | `engine/compliance.ts` | Publisher naming and money rules. |
 | `engine/payouts.ts` | Final places, prize splits, per-player shares, tax-form threshold. |
-| `server/operations.ts` | All tournament operations and background jobs. |
+| `server/operations.ts` | Tournament operations (check-in, results, disputes, extensions, bracket edits, closing) and background jobs. |
+| `server/create.ts`, `server/registration.ts`, `server/community.ts` | Publishing from the wizard; sign-ups and team balancing; announcements and tickets. Same pattern: pure operations on the tournament. |
+| `server/rosters.ts` | Saved teams, outside any one tournament. |
 | `server/views.ts` | Match desk and other read-only views. |
 | `server/summary.ts` | Library cards, leaderboards and the people list. Postgres computes the same in SQL (one query each); the seed parity test keeps the two in step. |
 | `server/data.ts` | Per-request cached reads shared by the header and pages, so each runs once per page. |
@@ -41,7 +43,9 @@ form (server action) → store.get(id) → operation(agg, ctx, request) → stor
 
 ## Pages and data
 
-Pages are server components that read through the store; the interactive parts (search and filters, the leaderboard ticker, hover cards, drag-to-swap, the notifications menu, the winner popup) are small client components that get ready-to-render data as props. Listing a tournament never loads the whole tournament: the library, leaderboards and "Acting as" list each come from one query.
+Pages are server components that read through the store; the interactive parts (search and filters, the leaderboard ticker, the bracket board, the wizard, the notifications menu, the winner popup) are client components that get ready-to-render data as props.
+
+Forms run in place: each calls a server action that runs one operation, saves, and returns a message (shown as a notice) while the page's data refreshes without navigating. The bracket board goes further: it computes a move with the same engine functions the server uses, shows it straight away (teams animate to their new spots), and saves in the background with the version it started from. If someone else saved first, the server refuses and the board settles on what's stored. Listing a tournament never loads the whole tournament: the library, leaderboards and "Acting as" list each come from one query.
 
 ## Result keys
 

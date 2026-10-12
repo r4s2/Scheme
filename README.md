@@ -2,7 +2,7 @@
 
 Find, host and run esports tournaments for Valorant, League of Legends, Overwatch and Marvel Rivals, with verified ranks, balanced teams, and an AI co-pilot for hosts.
 
-The tournament engine and tournament operations are built and tested, and hosts and players can run an event end to end in the app. Sign-in, event creation, the agent, Discord and payments come next. The clickable prototype shows the full intended product.
+Hosts can set up an event with the creation wizard (with publisher name checks), take team or solo sign-ups, build balanced teams, and run the bracket on a live board through to prizes. Players have profiles with linked ranks, saved teams, tickets and announcements. Sign-in, the agent, Discord and payments come next.
 
 ## Try it
 
@@ -22,11 +22,13 @@ Open http://localhost:3000. With no database configured, the app runs on the sam
 
 Use **Acting as** in the top bar to be the host (`kestrel`) or any player. Captains such as `glint` (Hot Coffee) and `lynx` (Backline Bandits) can report results. Things to try:
 
-1. Hover any team in a bracket to see its roster, ranks, karma and wins. As the host, drag a first-round team onto another to swap them.
-2. As `glint`, report Hot Coffee winning M4. As `lynx`, report the opposite. As `kestrel`, settle the dispute on the **Match desk**.
-3. As `kestrel`, approve the extension request, forfeit the overdue match, and enter results until there's a winner.
-4. **Close** the event, then switch to a player on the winning team (`ember` on Tilt Proof, say) for the winner popup, and check the bell.
-5. On Saturday Six-Stack, replace a no-show with a sub, start it, play it out, close it, and claim a cash prize (claims unlock 24 hours after closing).
+1. **Host a tournament:** walk the wizard. Name a Marvel Rivals event "Saturday Night Cup" to see NetEase's name rules block it and suggest alternatives, then publish.
+2. **Sign up:** as `glint`, open Ascendant Ladder Night and register Hot Coffee from the saved team in one step. As `zorra`, join Strategist Social solo.
+3. **The live board:** as `kestrel` on Friday Night Spike, drag a first-round team onto another (or click one, then the other), randomize, auto-seed, change the format, or enter a result right on a match. Teams glide into place and save in the background, with Undo. Hover any team for its roster, ranks, karma and wins.
+4. **Match desk:** as `glint`, report Hot Coffee winning M4; as `lynx`, report the opposite; as `kestrel`, settle the dispute and approve the extension request.
+5. **Tickets and announcements:** as `glint`, open a ticket; as `kestrel`, reply and post an announcement. Watch the bell.
+6. **Teams and profiles:** create a team on **Teams**, invite someone, switch to them and accept. Open any player's profile from a leaderboard.
+7. **Close** an event, then switch to a player on the winning team (`ember` on Tilt Proof, say) for the winner popup.
 
 Demo data resets when the server restarts.
 
@@ -40,6 +42,10 @@ Demo data resets when the server restarts.
 | `src/server/views.ts` | Read-only views for pages, like the host's match desk. |
 | `src/app/` | Pages: browse (search, filters, library, leaderboard ticker), leaderboards, my tournaments, notifications, and `t/[id]`, the tournament page with its server actions: registration, bracket, match desk, check-in, close, change log, player match page. |
 | `src/components/bracket/` | The bracket board: match cards, wires, status, team hover cards and drag-to-swap. |
+| `src/server/create.ts` | The creation wizard's draft, its checks (publisher rules, schedule, setup), and publishing. |
+| `src/server/registration.ts` | Team and solo sign-up with rank, verification and karma checks; building balanced teams from solo sign-ups. |
+| `src/server/community.ts` | Announcements and help tickets. |
+| `src/server/rosters.ts` | Saved teams: create, invite, accept, remove, hand over captaincy. |
 | `src/server/summary.ts` | Library cards, leaderboards (tournaments won) and the people list, from stored tournaments. |
 | `src/server/demo-data.ts` | Sample data for demo mode, and the source of `supabase/seed.sql`. |
 | `src/app/demo` | `/demo`: the engine drawing every format from sample data. |
@@ -76,9 +82,8 @@ Pages call server actions. Each action loads a tournament from the store, runs o
 
 ## Next up
 
-1. Sign-in with Supabase Auth (Discord and email), replacing the development "Acting as" switcher; Riot Sign On and Battle.net as account links.
-2. Event creation (the setup wizard with publisher checks) and registration.
-3. A background worker for auto-confirming reports, reminders and payout release (today these run when a tournament page is viewed).
-4. The Scheme Agent, built on the operations here: it proposes operations and the host approves them.
-5. Discord bot worker.
-6. Payments, once the provider decision in [docs/DECISIONS.md](docs/DECISIONS.md) is made.
+1. Sign-in with Supabase Auth (Discord and email), replacing the development "Acting as" switcher; Riot Sign On and Battle.net to link game accounts and verify ranks.
+2. A background worker for reminders, auto-confirming reports, opening check-in on schedule and payout release (today these run when a tournament page is viewed).
+3. The Scheme Agent, built on the operations here: it proposes changes and the host approves them.
+4. Discord bot worker: announcements, match threads and check-in from Discord.
+5. Payments, once the provider decision in [docs/DECISIONS.md](docs/DECISIONS.md) is made.

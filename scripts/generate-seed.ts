@@ -11,8 +11,7 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GAMES } from "@/engine";
-import { DEMO_HOST_KARMA, demoKarma, demoTournaments } from "@/server/demo-data";
+import { DEMO_HOST_KARMA, demoKarma, demoProfiles, demoRosters, demoTournaments } from "@/server/demo-data";
 import type { TournamentAgg } from "@/server/model";
 
 const out = join(dirname(fileURLToPath(import.meta.url)), "..", "supabase", "seed.sql");
@@ -54,6 +53,8 @@ for (const t of all) {
   for (const p of [...t.subs, ...t.pool]) handles.add(p.handle);
 }
 const people = [...handles].sort();
+const profiles = demoProfiles(all);
+const rosters = demoRosters();
 
 const tournaments: string[][] = [];
 const teams: string[][] = [];
@@ -63,6 +64,9 @@ const results: string[][] = [];
 const extensions: string[][] = [];
 const places: string[][] = [];
 const notices: string[] = [];
+const announcements: string[][] = [];
+const tickets: string[][] = [];
+const ticketMessages: string[][] = [];
 
 for (const t of all) {
   const id = tId(t);
@@ -72,8 +76,9 @@ for (const t of all) {
     : `'{}'::jsonb`;
   tournaments.push([
     q(id), q(userId(t.host)), q(t.name), q(t.game), q(t.state.format), String(t.state.bestOf), q(t.signupType),
-    t.signupType === "solo" ? "'even'" : "null", q(t.status), q(t.region), String(t.teamCount), textArray(GAMES[t.game].roles),
-    String(t.rankMin), String(t.rankMax), t.status === "registration" ? eastern(t.startsAt) : rel(t.startsAt), String(t.matchWindowHours), String(t.allowExtensions), textArray(t.houseRules),
+    t.signupType === "solo" ? q(t.balanceGoal) : "null", q(t.status), q(t.region), String(t.teamCount), textArray(t.roles),
+    String(t.rankMin), String(t.rankMax), String(t.requirements.minKarma), String(t.requirements.verifiedOnly), String(t.checkinMinutes),
+    t.status === "registration" ? eastern(t.startsAt) : rel(t.startsAt), String(t.matchWindowHours), String(t.allowExtensions), textArray(t.houseRules),
     String(t.entryFeeCents), String(t.withholdPct), `'{${t.payoutSplit.join(",")}}'::int[]`,
     `array[${t.state.slots.map((s) => q(teamId(t, s))).join(", ")}]::uuid[]`, deadlines, overrides,
     t.closure ? rel(t.closure.at) : "null", t.closure ? q(t.closure.method) : "null", t.closure ? q(t.closure.message) : "null",
@@ -106,6 +111,12 @@ for (const t of all) {
       );
     }
   }
+  for (const x of t.announcements) announcements.push([q(uuid(`a:${t.id}:${x.id}`)), q(id), q(x.audience), "array['app']::text[]", q(x.body), q(userId(x.sentBy)), rel(x.createdAt)]);
+  for (const k of t.tickets) {
+    const kid = uuid(`k:${t.id}:${k.id}`);
+    tickets.push([q(kid), q(id), q(userId(k.openedBy)), k.teamId ? q(teamId(t, k.teamId)) : "null", k.matchId ? q(k.matchId) : "null", q(k.category), q(k.subject), q(k.status), rel(k.createdAt)]);
+    for (const m of k.messages) ticketMessages.push([q(uuid(`km:${t.id}:${m.id}`)), q(kid), m.author ? q(userId(m.author)) : "null", q(m.body), rel(m.createdAt)]);
+  }
   t.closure?.places.forEach((group, i) => group.forEach((team) => places.push([q(id), q(teamId(t, team)), String(i + 1)])));
 }
 
@@ -133,9 +144,23 @@ insert into profiles (id, handle, attested_13_plus, verified_18_plus, player_kar
 ${values(people.map((h) => [q(userId(h)), q(h), "true", "true", String(demoKarma(h)), String(DEMO_HOST_KARMA[h] ?? 70)]))}
 on conflict do nothing;
 
+insert into game_accounts (profile_id, game, external_id, account_name, rank_score, roles, rank_source, verified_at) values
+${values(profiles.flatMap((p) => p.accounts.map((a) => [q(userId(p.handle)), q(a.game), q(`${a.game}:${p.handle.toLowerCase()}`), q(a.accountName), String(a.rankScore), textArray(a.roles), q(a.source), a.source === "api" ? "now()" : "null"])))}
+on conflict do nothing;
+
+-- Saved teams
+insert into teams (id, name, game, captain_id) values
+${values(rosters.map((r) => [q(uuid(`roster:${r.id}`)), q(r.name), q(r.game), q(userId(r.captain))]))}
+on conflict do nothing;
+
+insert into team_members (team_id, profile_id, role, status, joined_at) values
+${values(rosters.flatMap((r) => r.members.map((m) => [q(uuid(`roster:${r.id}`)), q(userId(m.handle)), m.role ? q(m.role) : "null", q(m.status), m.status === "active" ? "now()" : "null"])))}
+on conflict do nothing;
+
 -- Tournaments
 insert into tournaments (id, host_id, name, game, format, best_of, signup_type, balance_goal, status, region, team_count, roles,
-                         rank_min_score, rank_max_score, starts_at, match_window_hours, allow_extensions, house_rules,
+                         rank_min_score, rank_max_score, min_player_karma, verified_ranks_only, checkin_minutes,
+                         starts_at, match_window_hours, allow_extensions, house_rules,
                          entry_fee_cents, withhold_pct, payout_split, slots, wave_deadlines, deadline_overrides,
                          closed_at, close_method, close_message) values
 ${values(tournaments)}
@@ -165,6 +190,18 @@ on conflict do nothing;
 
 insert into final_places (tournament_id, tournament_team_id, place) values
 ${values(places)}
+on conflict do nothing;
+
+insert into announcements (id, tournament_id, audience, channels, body, sent_by, created_at) values
+${values(announcements)}
+on conflict do nothing;
+
+insert into tickets (id, tournament_id, opened_by, team_id, match_id, category, subject, status, created_at) values
+${values(tickets)}
+on conflict do nothing;
+
+insert into ticket_messages (id, ticket_id, author_id, body, created_at) values
+${values(ticketMessages)}
 on conflict do nothing;
 
 -- Notifications

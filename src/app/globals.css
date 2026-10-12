@@ -507,3 +507,5 @@ form[data-pending] button { opacity: 0.6; pointer-events: none; }
 .match .result-form .seg { width: 100%; display: flex; }
 .match .result-form .seg button { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 4px 6px; font-size: 12px; }
 .seg button[aria-checked="true"] { background: var(--ink); color: var(--bg); }
+/* Let grid children shrink so wide tables and step lists scroll inside instead of widening the page. */
+.wiz > *, .two > *, .lbpage > *, .home-top > *, .karma > * { min-width: 0; }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FORMAT_NAMES, formatCents } from "@/engine";
+import { FORMAT_NAMES, formatCents, rankName } from "@/engine";
 import { BracketBoard } from "@/components/bracket/BracketBoard";
 import { boardProps } from "@/components/bracket/props";
 import { GameBadge } from "@/components/ui/bits";
@@ -10,10 +10,14 @@ import { Desk } from "@/components/tournament/Desk";
 import { FinalResults } from "@/components/tournament/FinalResults";
 import { HostBracket } from "@/components/tournament/HostBracket";
 import { PlayerMatch } from "@/components/tournament/PlayerMatch";
-import { Registration } from "@/components/tournament/Registration";
+import { Announcements, Tickets } from "@/components/tournament/Community";
+import { Registration, type SignupContext } from "@/components/tournament/Registration";
+import { Stats } from "@/components/tournament/Stats";
 import { WinnerPopup } from "@/components/tournament/WinnerPopup";
 import { dollars, formatWhen } from "@/lib/format";
 import { teamWins } from "@/server/data";
+import type { TournamentAgg } from "@/server/model";
+import { ineligibility } from "@/server/registration";
 import { runDueJobs, teamOf } from "@/server/operations";
 import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
@@ -55,31 +59,28 @@ export default async function TournamentPage({
   const registering = agg.status === "registration";
   const deskCount = registering ? 0 : deskItems(agg, now).count;
 
-  const tabs: [string, string, number?][] = isHost
-    ? registering
-      ? [
-          ["bracket", "Registration"],
-          ["log", "Change log"],
-        ]
-      : [
-          ["bracket", "Bracket"],
-          ["desk", "Match desk", deskCount],
-          ...(agg.status === "checkin" ? ([["checkin", "Check-in"]] as [string, string][]) : []),
-          ...(open ? ([["close", "Close"]] as [string, string][]) : []),
-          ["log", "Change log"],
-        ]
-    : registering
-      ? [["bracket", "Registration"]]
-      : onTeam
-      ? [
-          ["match", "My match"],
-          ["bracket", "Bracket"],
-        ]
-      : [["bracket", "Bracket"]];
+  type Tab = [key: string, label: string, count?: number];
+  const inEvent = !!actor && (!!onTeam || agg.subs.some((p) => p.handle === actor) || agg.pool.some((p) => p.handle === actor));
+  const openTickets = agg.tickets.filter((k) => k.status === "open" && (isHost || k.openedBy === actor)).length;
+  const hasTeams = Object.keys(agg.state.teams).length > 0;
+  const tabs: Tab[] = [];
+  if (registering) tabs.push(["bracket", "Registration"]);
+  else {
+    if (onTeam && !isHost) tabs.push(["match", "My match"]);
+    tabs.push(["bracket", "Bracket"]);
+    if (isHost) tabs.push(["desk", "Match desk", deskCount]);
+    if (isHost && agg.status === "checkin") tabs.push(["checkin", "Check-in"]);
+  }
+  if (hasTeams) tabs.push(["stats", "Stats"]);
+  tabs.push(["announce", "Announcements"]);
+  if (isHost || inEvent) tabs.push(["tickets", "Tickets", openTickets]);
+  if (isHost && open && !registering) tabs.push(["close", "Close"]);
+  if (isHost) tabs.push(["log", "Change log"]);
   const tab = tabs.some((t) => t[0] === sp.tab) ? sp.tab! : tabs[0][0];
   const log = tab === "log" ? await store.auditLog(id) : [];
 
   const wins = await teamWins(agg.game);
+  const signup = registering && actor && !isHost ? await signupContext(agg, actor) : { actor, rosters: [], soloBlocker: null };
   const pill: Record<string, [string, string]> = {
     draft: ["quiet", "Draft"],
     registration: ["info", "Registration open"],
@@ -140,7 +141,7 @@ export default async function TournamentPage({
 
       {tab === "bracket" &&
         (agg.status === "registration" ? (
-          <Registration agg={agg} now={now} isHost={isHost} wins={wins} />
+          <Registration agg={agg} now={now} isHost={isHost} wins={wins} signup={signup} />
         ) : (
           <>
             <FinalResults agg={agg} />
@@ -152,6 +153,9 @@ export default async function TournamentPage({
           </>
         ))}
       {tab === "desk" && <Desk agg={agg} now={now} />}
+      {tab === "stats" && <Stats agg={agg} />}
+      {tab === "announce" && <Announcements agg={agg} isHost={isHost} />}
+      {tab === "tickets" && <Tickets agg={agg} actor={actor} isHost={isHost} />}
       {tab === "checkin" && <Checkin agg={agg} />}
       {tab === "close" && <ClosePanel agg={agg} />}
       {tab === "match" && actor && (
@@ -194,4 +198,32 @@ export default async function TournamentPage({
       )}
     </main>
   );
+}
+
+/** What the viewer needs to sign up: their saved teams for this game (with each member checked) or their own eligibility. */
+async function signupContext(agg: TournamentAgg, actor: string): Promise<SignupContext> {
+  const store = getStore();
+  if (agg.signupType === "solo") {
+    const [me] = await store.profiles([actor]);
+    return { actor, rosters: [], soloBlocker: ineligibility(agg, me, actor) };
+  }
+  const mine = (await store.rosters(actor)).filter((r) => r.game === agg.game && r.captain === actor);
+  const handles = [...new Set(mine.flatMap((r) => r.members.filter((m) => m.status === "active").map((m) => m.handle)))];
+  const profiles = await store.profiles(handles);
+  const byHandle = new Map(profiles.map((p) => [p.handle.toLowerCase(), p]));
+  return {
+    actor,
+    soloBlocker: null,
+    rosters: mine.map((r) => ({
+      id: r.id,
+      name: r.name,
+      members: r.members
+        .filter((m) => m.status === "active")
+        .map((m) => {
+          const p = byHandle.get(m.handle.toLowerCase());
+          const acct = p?.accounts.find((a) => a.game === agg.game);
+          return { handle: m.handle, role: m.role, rank: acct ? rankName(agg.game, acct.rankScore) : "—", blocker: ineligibility(agg, p, m.handle) };
+        }),
+    })),
+  };
 }

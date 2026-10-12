@@ -41,7 +41,7 @@ export async function Header() {
           />
         )}
         {actor && (
-          <Link href="/mine" className="me" style={{ color: "inherit", textDecoration: "none" }}>
+          <Link href={`/u/${actor}`} className="me" style={{ color: "inherit", textDecoration: "none" }}>
             <span className="avatar" aria-hidden="true">
               {actor[0]?.toUpperCase()}
             </span>

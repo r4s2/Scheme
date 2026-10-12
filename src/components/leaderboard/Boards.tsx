@@ -32,7 +32,7 @@ export function Boards({ boards, missing }: { boards: Board[]; missing: string[]
           <h3 style={{ fontSize: 17 }}>{b.label}</h3>
           <input type="search" placeholder={`Find a ${b.kind}`} value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter leaderboard" />
         </div>
-        {rows.length ? <BoardList rows={rows} /> : <div className="empty">No matches for that search.</div>}
+        {rows.length ? <BoardList rows={rows} players={b.kind === "player"} /> : <div className="empty">No matches for that search.</div>}
       </div>
     </div>
   );

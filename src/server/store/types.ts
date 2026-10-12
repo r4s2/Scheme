@@ -1,5 +1,5 @@
 import type { FormatId, GameId } from "@/engine";
-import type { AuditEntry, Effects, Outcome, TournamentAgg, TournamentStatus } from "../model";
+import type { AuditEntry, Effects, Notice, Outcome, Profile, Roster, TournamentAgg, TournamentStatus } from "../model";
 
 /** What the tournament library and lists need, without loading whole tournaments. */
 export interface TournamentSummary {
@@ -59,6 +59,17 @@ export interface Store {
   /** First places from closed tournaments. */
   wins(): Promise<Win[]>;
   people(): Promise<Person[]>;
+  /** Save a new tournament made with the wizard. */
+  create(agg: TournamentAgg, effects: Effects): Promise<TournamentAgg>;
+  /** Profiles with their game accounts; unknown handles are left out. */
+  profiles(handles: string[]): Promise<Profile[]>;
+  /** Saved teams the player captains or belongs to (including pending invites). */
+  rosters(handle: string): Promise<Roster[]>;
+  roster(id: string): Promise<Roster | null>;
+  /** Create or update a saved team and its members. */
+  saveRoster(roster: Roster): Promise<Roster>;
+  /** Send notifications that aren't part of a tournament save (team invites, for example). */
+  notify(notices: Notice[]): Promise<void>;
   get(id: string): Promise<TournamentAgg | null>;
   /**
    * Save an operation's result. `prev` is the copy the operation started

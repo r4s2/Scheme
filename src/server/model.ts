@@ -1,4 +1,4 @@
-import type { CloseMethod, GameId, Player, Schedule, TournamentState } from "@/engine";
+import type { CloseMethod, GameId, Player, RankSource, Schedule, TournamentState } from "@/engine";
 
 /**
  * The tournament aggregate: everything one tournament's operations read and
@@ -53,6 +53,61 @@ export interface Payout {
   status: "pending" | "claimable" | "claimed";
 }
 
+export interface Announcement {
+  id: string;
+  /** "all", "captains", or a team id. */
+  audience: string;
+  body: string;
+  sentBy: string;
+  createdAt: string;
+}
+
+export interface TicketMessage {
+  id: string;
+  /** Null for system messages. */
+  author: string | null;
+  body: string;
+  createdAt: string;
+}
+
+export interface Ticket {
+  id: string;
+  openedBy: string;
+  teamId?: string;
+  matchId?: string;
+  category: "result" | "player" | "rules" | "schedule" | "other";
+  subject: string;
+  status: "open" | "answered" | "closed";
+  createdAt: string;
+  messages: TicketMessage[];
+}
+
+/** A player's linked account for one game: where their rank comes from. */
+export interface GameAccount {
+  game: GameId;
+  /** Riot ID, BattleTag or Marvel Rivals UID, as shown to others. */
+  accountName: string;
+  rankScore: number;
+  source: RankSource;
+  roles: string[];
+}
+
+export interface Profile {
+  handle: string;
+  playerKarma: number;
+  hostKarma: number;
+  accounts: GameAccount[];
+}
+
+/** A saved team: a captain and members who play one game together across events. */
+export interface Roster {
+  id: string;
+  name: string;
+  game: GameId;
+  captain: string;
+  members: { handle: string; role: string | null; status: "invited" | "active" }[];
+}
+
 export interface Closure {
   at: string;
   method: CloseMethod;
@@ -84,6 +139,13 @@ export interface TournamentAgg {
   /** Allowed rank range, as ladder scores. */
   rankMin: number;
   rankMax: number;
+  /** One entry per seat on a team, e.g. Overwatch 5v5 or 6v6. */
+  roles: string[];
+  requirements: { minKarma: number; verifiedOnly: boolean };
+  /** How solo sign-ups are turned into teams. */
+  balanceGoal: "even" | "tiers";
+  /** Check-in opens this many minutes before the start. */
+  checkinMinutes: number;
   state: TournamentState;
   schedule: Schedule;
   /** Free agents available to replace no-shows. */
@@ -98,6 +160,8 @@ export interface TournamentAgg {
   disputes: Dispute[];
   extensions: ExtensionRequest[];
   payouts: Payout[];
+  announcements: Announcement[];
+  tickets: Ticket[];
   closure?: Closure;
   cancelReason?: string;
 }

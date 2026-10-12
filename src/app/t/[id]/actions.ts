@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import type { CloseMethod, FormatId, TournamentState } from "@/engine";
 import { OperationError, type Ctx, type Outcome, type TournamentAgg } from "@/server/model";
 import * as op from "@/server/operations";
-import { ConflictError, DatabaseUnavailableError, getStore } from "@/server/store";
+import * as community from "@/server/community";
+import * as reg from "@/server/registration";
+import { ConflictError, DatabaseUnavailableError, getStore, type Store } from "@/server/store";
 import { currentActor } from "@/server/session";
 
 const FORMATS: FormatId[] = ["single", "double", "rr", "swiss", "groups"];
@@ -22,8 +24,35 @@ const num = (fd: FormData, name: string) => {
 };
 
 /** Map a form submission to an operation. Every operation checks its own permissions. */
-function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData): Outcome {
+async function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData, store: Store): Promise<Outcome> {
   switch (name) {
+    case "registerTeam": {
+      let players: unknown;
+      try {
+        players = JSON.parse(field(fd, "players"));
+      } catch {
+        throw new OperationError("The roster couldn't be read.");
+      }
+      if (!Array.isArray(players) || !players.every((p) => p && typeof p.handle === "string" && typeof p.role === "string")) throw new OperationError("The roster couldn't be read.");
+      const entry = { name: field(fd, "name"), players: players as { handle: string; role: string }[] };
+      return reg.registerTeam(agg, ctx, entry, await store.profiles(entry.players.map((p) => p.handle).filter(Boolean)));
+    }
+    case "withdrawTeam":
+      return reg.withdrawTeam(agg, ctx, field(fd, "teamId"));
+    case "joinSolo":
+      return reg.joinSolo(agg, ctx, field(fd, "role"), (await store.profiles([ctx.actor]))[0]);
+    case "leaveSolo":
+      return reg.leaveSolo(agg, ctx);
+    case "buildTeams":
+      return reg.buildSoloTeams(agg, ctx);
+    case "announce":
+      return community.postAnnouncement(agg, ctx, String(fd.get("body") ?? ""), fd.get("audience") === "captains" ? "captains" : "all");
+    case "openTicket":
+      return community.openTicket(agg, ctx, { category: field(fd, "category"), subject: String(fd.get("subject") ?? ""), body: String(fd.get("body") ?? ""), matchId: String(fd.get("matchId") ?? "") });
+    case "replyTicket":
+      return community.replyTicket(agg, ctx, field(fd, "ticketId"), String(fd.get("body") ?? ""));
+    case "closeTicket":
+      return community.closeTicket(agg, ctx, field(fd, "ticketId"));
     case "openCheckin":
       return op.openCheckin(agg, ctx);
     case "checkIn":
@@ -138,7 +167,7 @@ export async function runOp(_prev: OpResult | null, fd: FormData): Promise<OpRes
     return { ok: false, message: "Someone else changed this tournament a moment ago. You're now seeing the latest.", at, ...latest };
   }
   try {
-    const out = dispatch(name, agg, { now: new Date(), actor, newId: () => crypto.randomUUID() }, fd);
+    const out = await dispatch(name, agg, { now: new Date(), actor, newId: () => crypto.randomUUID() }, fd, store);
     const saved = await store.commit(agg, out);
     revalidatePath(`/t/${id}`);
     return { ok: true, message: out.message, at, state: saved.state, version: saved.version };

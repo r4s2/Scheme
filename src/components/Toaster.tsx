@@ -16,6 +16,18 @@ export function toast(t: ToastInput) {
   window.dispatchEvent(new CustomEvent<ToastInput>(EVENT, { detail: t }));
 }
 
+/**
+ * Wrap a form action so its result shows as a notice the moment it finishes,
+ * even if the form itself disappears when the page updates.
+ */
+export function withNotice<R extends { ok: boolean; message: string }, P>(action: (prev: P, fd: FormData) => Promise<R>) {
+  return async (prev: P, fd: FormData): Promise<R> => {
+    const r = await action(prev, fd);
+    toast({ message: r.message, tone: r.ok ? "ok" : "err" });
+    return r;
+  };
+}
+
 /** Renders notices from toast(). Mounted once, in the root layout. */
 export function Toaster() {
   const [items, setItems] = useState<(ToastInput & { id: number })[]>([]);

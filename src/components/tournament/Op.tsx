@@ -1,9 +1,12 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { runOp, type OpResult } from "@/app/t/[id]/actions";
-import { toast } from "@/components/Toaster";
+import { withNotice } from "@/components/Toaster";
 import ui from "../ui.module.css";
+
+/** Runs the action and shows its result as a notice. */
+const run = withNotice(runOp);
 
 /**
  * A form that runs one tournament operation in place: no page reload, the
@@ -22,10 +25,7 @@ export function Op({
   children: React.ReactNode;
   className?: string;
 }) {
-  const [result, action, pending] = useActionState<OpResult | null, FormData>(runOp, null);
-  useEffect(() => {
-    if (result) toast({ message: result.message, tone: result.ok ? "ok" : "err" });
-  }, [result]);
+  const [, action, pending] = useActionState<OpResult | null, FormData>(run, null);
   return (
     <form action={action} className={className ?? ui.inline} aria-busy={pending} data-pending={pending || undefined}>
       <input type="hidden" name="tournamentId" value={tid} />

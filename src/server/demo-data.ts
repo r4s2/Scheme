@@ -1,5 +1,5 @@
 import { GAMES, buildBracket, finalPlaces, makeSchedule, pairKey, playableMatches, recordResult, type FormatId, type GameId, type Player, type Team, type TournamentState } from "@/engine";
-import type { TournamentAgg } from "./model";
+import type { Profile, Roster, TournamentAgg } from "./model";
 
 /**
  * Sample data, mirroring the prototype. Demo mode loads it into memory, and
@@ -92,12 +92,18 @@ function base(o: Partial<TournamentAgg> & Pick<TournamentAgg, "id" | "name" | "g
     matchWindowHours: 24,
     state: { format, bestOf, slots: Object.keys(teams), teams, results: {} },
     schedule: { waveDeadlines: [], overrides: {} },
+    roles: GAMES[o.game].roles,
+    requirements: { minKarma: 0, verifiedOnly: o.game !== "mr" },
+    balanceGoal: "even",
+    checkinMinutes: 60,
     subs: [],
     pool: [],
     reports: [],
     disputes: [],
     extensions: [],
     payouts: [],
+    announcements: [],
+    tickets: [],
     ...rest,
   };
 }
@@ -170,6 +176,23 @@ function fridayNightSpike(now: Date): TournamentAgg {
   };
   t.extensions = [
     { id: "x1", matchId: "M4", teamId: "hot-coffee", requestedBy: "glint", hours: 1, reason: "Two of us get off work late. Backline Bandits agreed to start an hour later.", status: "pending", createdAt: at(now, -1) },
+  ];
+  t.announcements = [
+    { id: "a1", audience: "all", body: "Welcome to Friday Night Spike! Lobby details are on your match page. Captains: screenshot the final scoreboard of every map.", sentBy: "kestrel", createdAt: at(now, -26) },
+    { id: "a2", audience: "all", body: "Round 1 closes in a few hours. If you can't play before the deadline, request an extension from your match page.", sentBy: "kestrel", createdAt: at(now, -6) },
+  ];
+  t.tickets = [
+    {
+      id: "k1",
+      openedBy: "lynx",
+      teamId: "backline-bandits",
+      matchId: "M4",
+      category: "schedule",
+      subject: "Can M4 start an hour later?",
+      status: "open",
+      createdAt: at(now, -2),
+      messages: [{ id: "k1m1", author: "lynx", body: "Hot Coffee asked to push M4 by an hour and we're fine with it. Just checking that's OK with you.", createdAt: at(now, -2) }],
+    },
   ];
   return t;
 }
@@ -364,3 +387,64 @@ const RESERVED = new Set([
   ...Object.keys(DEMO_HOST_KARMA),
   ..."zorra mirka luxen velis tavro neoka ashri rindo daxen yulo fenra oroth pipka solix zenra jaxo iralo bexen cyro kaito luma mira tovi nyla sablewing quartzy harlow".split(" "),
 ]);
+
+// ---------------------------------------------------------------------------
+// Profiles and saved teams
+
+const NAME_SUFFIX: Record<GameId, (h: string) => string> = {
+  val: (h) => `${h}#NA1`,
+  lol: (h) => `${h}#NA1`,
+  ow: (h) => `${h[0].toUpperCase()}${h.slice(1)}#${1000 + (hash(h) % 9000)}`,
+  mr: (h) => `UID ${100000000 + (hash(h) % 900000000)}`,
+};
+
+/** Kestrel hosts most samples but plays too: an account in every game. */
+const KESTREL_ACCOUNTS: [GameId, number][] = [["val", 18], ["mr", 14], ["ow", 17], ["lol", 15]];
+
+/**
+ * Everyone in the sample data, with a linked account (and verified rank) for
+ * each game they play. A player's rank is taken from their most current
+ * event: open and live events first, then the newest closed one.
+ */
+export function demoProfiles(all: TournamentAgg[]): Profile[] {
+  const byCurrency = [...all].sort((a, b) => rankOrder(a) - rankOrder(b) || b.startsAt.localeCompare(a.startsAt));
+  const profiles = new Map<string, Profile>();
+  const get = (h: string) => {
+    let p = profiles.get(h);
+    if (!p) profiles.set(h, (p = { handle: h, playerKarma: demoKarma(h), hostKarma: DEMO_HOST_KARMA[h] ?? 70, accounts: [] }));
+    return p;
+  };
+  for (const t of byCurrency) {
+    get(t.host);
+    const people = [...Object.values(t.state.teams).flatMap((x) => x.players), ...t.subs, ...t.pool];
+    for (const pl of people) {
+      const p = get(pl.handle);
+      if (!p.accounts.some((a) => a.game === t.game)) p.accounts.push({ game: t.game, accountName: NAME_SUFFIX[t.game](pl.handle), rankScore: pl.score, source: pl.verified, roles: [pl.role] });
+    }
+  }
+  const k = get("kestrel");
+  for (const [game, score] of KESTREL_ACCOUNTS) {
+    if (!k.accounts.some((a) => a.game === game)) k.accounts.push({ game, accountName: NAME_SUFFIX[game]("kestrel"), rankScore: score, source: game === "mr" ? "self" : "api", roles: [GAMES[game].roles[0]] });
+  }
+  // Same order as the database's game_id enum.
+  const order = Object.keys(GAMES);
+  for (const p of profiles.values()) p.accounts.sort((a, b) => order.indexOf(a.game) - order.indexOf(b.game));
+  return [...profiles.values()].sort((a, b) => a.handle.localeCompare(b.handle));
+}
+
+function rankOrder(t: TournamentAgg) {
+  return t.status === "complete" || t.status === "cancelled" ? 1 : 0;
+}
+
+/** Saved teams: every team that plays in the sample history, with its regular roster. */
+export function demoRosters(): Roster[] {
+  // Generated handles are handed out in a fixed order the first time the sample is built.
+  demoTournaments(new Date(0));
+  const out: Roster[] = [];
+  const add = (game: GameId, name: string, handles: string[]) =>
+    out.push({ id: `${game}-${slug(name)}`, name, game, captain: handles[0], members: handles.map((h, i) => ({ handle: h, role: GAMES[game].roles[i] ?? null, status: "active" })) });
+  for (const [name] of VAL_TEAMS) add("val", name, valRoster(name));
+  for (const name of MR_TEAMS) add("mr", name, rosterFor("mr", name));
+  for (const name of OW_TEAMS) add("ow", name, rosterFor("ow", name));
+  return out;
+}

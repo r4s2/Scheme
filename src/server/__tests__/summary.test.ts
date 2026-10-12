@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEMO_HOST_KARMA, demoTournaments } from "../demo-data";
+import { demoTournaments } from "../demo-data";
 import { OperationError } from "../model";
 import * as op from "../operations";
 import { MemoryStore } from "../store/memory";
@@ -52,7 +52,7 @@ describe("library cards", () => {
 
 describe("leaderboards", () => {
   it("ranks teams and players by tournaments won, with a board per game that has closed events", async () => {
-    const boards = buildBoards(await new MemoryStore(all, DEMO_HOST_KARMA).wins());
+    const boards = buildBoards(await new MemoryStore(all).wins());
     expect(boards.map((b) => b.label)).toEqual(["Teams", "Players", "Valorant", "Marvel Rivals", "Overwatch"]);
     expect(boards[0].rows.slice(0, 3)).toEqual([
       { name: "Tilt Proof", wins: 6, detail: "Valorant" },

@@ -46,6 +46,9 @@ function begin(agg: TournamentAgg) {
     extensions: [...agg.extensions],
     payouts: [...agg.payouts],
     subs: [...agg.subs],
+    pool: [...agg.pool],
+    announcements: [...agg.announcements],
+    tickets: [...agg.tickets],
   };
   return { next, effects };
 }
@@ -564,3 +567,6 @@ export function runDueJobs(agg: TournamentAgg, now: Date): Outcome | null {
   }
   return changed ? done(next, effects, "Background jobs ran.") : null;
 }
+
+/** Building blocks shared with the registration and community operations. */
+export { audit, begin, done, everyone, notify, requireHost, teamName };

@@ -1,5 +1,5 @@
 import "server-only";
-import { demoTournaments } from "../demo-data";
+import { demoProfiles, demoRosters, demoTournaments } from "../demo-data";
 import { FallbackStore } from "./fallback";
 import { MemoryStore } from "./memory";
 import { PostgresStore } from "./postgres";
@@ -19,7 +19,10 @@ type Cache = { __schemeStore?: Store; __schemeStoreUrl?: string };
  */
 export type StoreMode = "database" | "demo" | "offline";
 
-const demo = () => new MemoryStore(demoTournaments(new Date()));
+const demo = () => {
+  const all = demoTournaments(new Date());
+  return new MemoryStore(all, demoProfiles(all), demoRosters());
+};
 
 /** In development, fall back to demo data when the database can't be reached. Never in production. */
 function fallbackEnabled() {
