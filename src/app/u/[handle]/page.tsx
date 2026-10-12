@@ -9,6 +9,7 @@ import { formatWhen } from "@/lib/format";
 import { listTournaments } from "@/server/data";
 import { getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
+import { setLookingForTeam } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +41,23 @@ export default async function ProfilePage({ params }: { params: Promise<{ handle
           <h1>{profile.handle}</h1>
           <p className="muted small">
             {events.length - hosted} event{events.length - hosted === 1 ? "" : "s"} played · {hosted} hosted · {myWins.length} won
+            {profile.lookingForTeam && (
+              <>
+                {" "}
+                · <span className="pill good">Looking for a team</span>
+              </>
+            )}
           </p>
         </div>
+        <span className="spacer" />
+        {me && (
+          <form action={setLookingForTeam}>
+            <input type="hidden" name="on" value={profile.lookingForTeam ? "0" : "1"} />
+            <button className={`btn sm ${profile.lookingForTeam ? "" : "primary"}`} title="Captains can find and invite you on the Teams page">
+              {profile.lookingForTeam ? "Stop looking for a team" : "I'm looking for a team"}
+            </button>
+          </form>
+        )}
       </div>
 
       <div className="karma">

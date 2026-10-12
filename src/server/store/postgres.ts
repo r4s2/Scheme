@@ -301,21 +301,31 @@ export class PostgresStore implements Store {
         returning version`;
       if (updated.length === 0) throw new ConflictError();
 
+      // Only rewrite what this operation changed: a swap touches the tournament row and the log, not the rosters.
+      const differs = (x: unknown, y: unknown) => JSON.stringify(x) !== JSON.stringify(y);
+      const teamsChanged = differs(prev.state.teams, a.state.teams) || differs(prev.subs, a.subs);
+      const entriesChanged = differs(prev.subs, a.subs) || differs(prev.pool, a.pool);
+      const resultsChanged = differs(prev.state.results, a.state.results);
+      const reportsChanged = differs(prev.reports, a.reports);
+      const disputesChanged = differs(prev.disputes, a.disputes);
+      const extensionsChanged = differs(prev.extensions, a.extensions);
+      const announcementsChanged = differs(prev.announcements, a.announcements);
+      const ticketsChanged = differs(prev.tickets, a.tickets);
+      const payoutsChanged = differs(prev.payouts, a.payouts);
+
       const players = Object.values(a.state.teams).flatMap((t) => t.players.map((p) => ({ team: t.id, p })));
       const handles = new Set<string>([
-        ...players.map((x) => x.p.handle),
-        ...Object.values(a.state.teams).map((t) => t.captain),
-        ...a.subs.map((s) => s.handle),
-        ...a.pool.map((s) => s.handle),
-        ...a.announcements.map((x) => x.sentBy),
-        ...a.tickets.flatMap((k) => [k.openedBy, ...k.messages.flatMap((m) => (m.author ? [m.author] : []))]),
-        ...a.reports.map((r) => r.reporter),
-        ...a.extensions.map((x) => x.requestedBy),
-        ...a.payouts.map((p) => p.handle),
+        ...(teamsChanged ? [...players.map((x) => x.p.handle), ...Object.values(a.state.teams).map((t) => t.captain)] : []),
+        ...(entriesChanged ? [...a.subs.map((s) => s.handle), ...a.pool.map((s) => s.handle)] : []),
+        ...(announcementsChanged ? a.announcements.map((x) => x.sentBy) : []),
+        ...(ticketsChanged ? a.tickets.flatMap((k) => [k.openedBy, ...k.messages.flatMap((m) => (m.author ? [m.author] : []))]) : []),
+        ...(reportsChanged ? a.reports.map((r) => r.reporter) : []),
+        ...(extensionsChanged ? a.extensions.map((x) => x.requestedBy) : []),
+        ...(payoutsChanged ? a.payouts.map((p) => p.handle) : []),
         ...notices.map((n) => n.recipient),
         ...audit.map((e) => e.actor),
       ]);
-      const idRows = await sql`select id, handle from profiles where handle = any(${sql.array([...handles])})`;
+      const idRows = handles.size ? await sql`select id, handle from profiles where handle = any(${sql.array([...handles])})` : [];
       const idOf = new Map<string, string>(idRows.map((r) => [String(r.handle).toLowerCase(), r.id as string]));
       const pid = (h: string) => {
         const v = idOf.get(h.toLowerCase());
@@ -326,86 +336,98 @@ export class PostgresStore implements Store {
 
       // Rosters: captains and players (check-ins, subs, swaps).
       // Teams: registration adds and removes them; afterwards only captains change.
-      const teamRows = Object.values(a.state.teams).map((t) => ({ id: t.id, tournament_id: a.id, name: t.name, captain_id: pid(t.captain) }));
-      if (teamRows.length) {
-        await sql`insert into tournament_teams ${sql(teamRows)} on conflict (id) do update set captain_id = excluded.captain_id, name = excluded.name`;
+      if (teamsChanged) {
+        const teamRows = Object.values(a.state.teams).map((t) => ({ id: t.id, tournament_id: a.id, name: t.name, captain_id: pid(t.captain) }));
+        if (teamRows.length) {
+          await sql`insert into tournament_teams ${sql(teamRows)} on conflict (id) do update set captain_id = excluded.captain_id, name = excluded.name`;
+        }
+        if (prev.status === "registration") {
+          await sql`delete from tournament_teams where tournament_id = ${a.id} and not (id = any(${sql.array(teamRows.map((t) => t.id))}::uuid[]))`;
+        }
+        // Keep each player's original check-in time and sub flag across saves.
+        const existing = await sql`
+          select profile_id, checked_in_at, is_sub from tournament_players
+          where tournament_team_id in (select id from tournament_teams where tournament_id = ${a.id})`;
+        const before = new Map(existing.map((r) => [r.profile_id as string, r]));
+        await sql`delete from tournament_players where tournament_team_id in (select id from tournament_teams where tournament_id = ${a.id})`;
+        if (players.length) {
+          const now = new Date().toISOString();
+          await sql`insert into tournament_players ${sql(
+            players.map(({ team, p }) => {
+              const id = pid(p.handle);
+              const old = before.get(id);
+              return {
+                tournament_team_id: team,
+                profile_id: id,
+                role: p.role,
+                rank_score: p.score,
+                rank_source: p.verified,
+                checked_in_at: p.checkedIn ? (old?.checked_in_at ?? now) : null,
+                is_sub: Boolean(old?.is_sub) || prev.subs.some((s) => s.handle === p.handle),
+              };
+            }),
+          )}`;
+        }
       }
-      if (prev.status === "registration") {
-        await sql`delete from tournament_teams where tournament_id = ${a.id} and not (id = any(${sql.array(teamRows.map((t) => t.id))}::uuid[]))`;
-      }
-      // Keep each player's original check-in time and sub flag across saves.
-      const existing = await sql`
-        select profile_id, checked_in_at, is_sub from tournament_players
-        where tournament_team_id in (select id from tournament_teams where tournament_id = ${a.id})`;
-      const before = new Map(existing.map((r) => [r.profile_id as string, r]));
-      await sql`delete from tournament_players where tournament_team_id in (select id from tournament_teams where tournament_id = ${a.id})`;
-      if (players.length) {
-        const now = new Date().toISOString();
-        await sql`insert into tournament_players ${sql(
-          players.map(({ team, p }) => {
-            const id = pid(p.handle);
-            const old = before.get(id);
-            return {
-              tournament_team_id: team,
-              profile_id: id,
-              role: p.role,
-              rank_score: p.score,
-              rank_source: p.verified,
-              checked_in_at: p.checkedIn ? (old?.checked_in_at ?? now) : null,
-              is_sub: Boolean(old?.is_sub) || prev.subs.some((s) => s.handle === p.handle),
-            };
-          }),
-        )}`;
-      }
-      await sql`delete from tournament_entries where tournament_id = ${a.id} and status in ('sub', 'registered')`;
-      if (a.pool.length) {
-        await sql`insert into tournament_entries ${sql(
-          a.pool.map((s) => ({ tournament_id: a.id, profile_id: pid(s.handle), role: s.role, rank_score: s.score, rank_source: s.verified, status: "registered" })),
-        )} on conflict (tournament_id, profile_id) do update set status = 'registered', role = excluded.role`;
-      }
-      if (a.subs.length) {
-        await sql`insert into tournament_entries ${sql(
-          a.subs.map((s) => ({ tournament_id: a.id, profile_id: pid(s.handle), role: s.role, rank_score: s.score, rank_source: s.verified, status: "sub" })),
-        )} on conflict (tournament_id, profile_id) do update set status = 'sub'`;
+      if (entriesChanged) {
+        await sql`delete from tournament_entries where tournament_id = ${a.id} and status in ('sub', 'registered')`;
+        if (a.pool.length) {
+          await sql`insert into tournament_entries ${sql(
+            a.pool.map((s) => ({ tournament_id: a.id, profile_id: pid(s.handle), role: s.role, rank_score: s.score, rank_source: s.verified, status: "registered" })),
+          )} on conflict (tournament_id, profile_id) do update set status = 'registered', role = excluded.role`;
+        }
+        if (a.subs.length) {
+          await sql`insert into tournament_entries ${sql(
+            a.subs.map((s) => ({ tournament_id: a.id, profile_id: pid(s.handle), role: s.role, rank_score: s.score, rank_source: s.verified, status: "sub" })),
+          )} on conflict (tournament_id, profile_id) do update set status = 'sub'`;
+        }
       }
 
       // Results and the records around them.
-      await sql`delete from match_results where tournament_id = ${a.id}`;
-      const results = Object.entries(a.state.results);
-      if (results.length) {
-        await sql`insert into match_results ${sql(
-          results.map(([key, r]) => ({ tournament_id: a.id, result_key: key, match_id: r.matchId, winner_team_id: r.winner, w: r.w, l: r.l, source: r.by })),
-        )}`;
+      if (resultsChanged) {
+        await sql`delete from match_results where tournament_id = ${a.id}`;
+        const results = Object.entries(a.state.results);
+        if (results.length) {
+          await sql`insert into match_results ${sql(
+            results.map(([key, r]) => ({ tournament_id: a.id, result_key: key, match_id: r.matchId, winner_team_id: r.winner, w: r.w, l: r.l, source: r.by })),
+          )}`;
+        }
       }
-      await sql`delete from match_reports where tournament_id = ${a.id}`;
-      if (a.reports.length) {
-        await sql`insert into match_reports ${sql(
-          a.reports.map((r) => ({ id: r.id, tournament_id: a.id, match_id: r.matchId, team_id: r.teamId, reporter_id: pid(r.reporter), winner_team_id: r.winner, w: r.w, l: r.l, created_at: r.createdAt })),
-        )}`;
+      if (reportsChanged) {
+        await sql`delete from match_reports where tournament_id = ${a.id}`;
+        if (a.reports.length) {
+          await sql`insert into match_reports ${sql(
+            a.reports.map((r) => ({ id: r.id, tournament_id: a.id, match_id: r.matchId, team_id: r.teamId, reporter_id: pid(r.reporter), winner_team_id: r.winner, w: r.w, l: r.l, created_at: r.createdAt })),
+          )}`;
+        }
       }
-      await sql`delete from disputes where tournament_id = ${a.id}`;
-      if (a.disputes.length) {
-        await sql`insert into disputes ${sql(
-          a.disputes.map((d) => ({ id: d.id, tournament_id: a.id, match_id: d.matchId, status: d.status, resolution: d.resolution ?? null, created_at: d.createdAt, resolved_at: d.resolvedAt ?? null })),
-        )}`;
+      if (disputesChanged) {
+        await sql`delete from disputes where tournament_id = ${a.id}`;
+        if (a.disputes.length) {
+          await sql`insert into disputes ${sql(
+            a.disputes.map((d) => ({ id: d.id, tournament_id: a.id, match_id: d.matchId, status: d.status, resolution: d.resolution ?? null, created_at: d.createdAt, resolved_at: d.resolvedAt ?? null })),
+          )}`;
+        }
       }
-      await sql`delete from extension_requests where tournament_id = ${a.id}`;
-      if (a.extensions.length) {
-        await sql`insert into extension_requests ${sql(
-          a.extensions.map((x) => ({
-            id: x.id, tournament_id: a.id, match_id: x.matchId, team_id: x.teamId, requested_by: pid(x.requestedBy),
-            hours: x.hours, reason: x.reason, status: x.status, created_at: x.createdAt, decided_at: x.decidedAt ?? null,
-          })),
-        )}`;
+      if (extensionsChanged) {
+        await sql`delete from extension_requests where tournament_id = ${a.id}`;
+        if (a.extensions.length) {
+          await sql`insert into extension_requests ${sql(
+            a.extensions.map((x) => ({
+              id: x.id, tournament_id: a.id, match_id: x.matchId, team_id: x.teamId, requested_by: pid(x.requestedBy),
+              hours: x.hours, reason: x.reason, status: x.status, created_at: x.createdAt, decided_at: x.decidedAt ?? null,
+            })),
+          )}`;
+        }
       }
 
       // Announcements and tickets only ever grow; tickets change status.
-      if (a.announcements.length) {
+      if (announcementsChanged && a.announcements.length) {
         await sql`insert into announcements ${sql(
           a.announcements.map((x) => ({ id: x.id, tournament_id: a.id, audience: x.audience, channels: sql.array(["app"]), body: x.body, sent_by: pidOrNull(x.sentBy), created_at: x.createdAt })),
         )} on conflict (id) do nothing`;
       }
-      if (a.tickets.length) {
+      if (ticketsChanged && a.tickets.length) {
         await sql`insert into tickets ${sql(
           a.tickets.map((k) => ({
             id: k.id, tournament_id: a.id, opened_by: pid(k.openedBy), team_id: k.teamId ?? null, match_id: k.matchId ?? null,
@@ -425,7 +447,7 @@ export class PostgresStore implements Store {
           await sql`insert into prizes (tournament_id, name, claim_instructions) values (${a.id}, ${a.closure.prize.name}, ${a.closure.prize.claim})`;
         }
       }
-      for (const p of a.payouts) {
+      for (const p of payoutsChanged ? a.payouts : []) {
         await sql`
           insert into payouts (tournament_id, tournament_team_id, profile_id, place, amount_cents, status, release_at, claimed_at)
           values (${a.id}, ${p.teamId}, ${pid(p.handle)}, ${p.place}, ${p.cents}, ${p.status}, ${p.releaseAt}, ${p.status === "claimed" ? new Date().toISOString() : null})
@@ -444,9 +466,8 @@ export class PostgresStore implements Store {
         )}`;
       }
     });
-    const saved = await this.get(a.id);
-    if (!saved) throw new Error("Tournament disappeared during save.");
-    return saved;
+    // What was just written, without reading it back.
+    return { ...a, version: prev.version + 1 };
   }
 
   async create(agg: TournamentAgg, effects: Effects): Promise<TournamentAgg> {
@@ -474,20 +495,34 @@ export class PostgresStore implements Store {
       join profiles p on lower(p.handle) = lower(n.recipient)`;
   }
 
-  async profiles(handles: string[]): Promise<Profile[]> {
-    if (!handles.length) return [];
+  private async profileRows(where: postgres.PendingQuery<postgres.Row[]>): Promise<Profile[]> {
     const rows = await this.sql`
-      select p.handle::text as handle, p.player_karma, p.host_karma,
+      select p.handle::text as handle, p.player_karma, p.host_karma, p.looking_for_team,
              coalesce(json_agg(json_build_object('game', g.game, 'accountName', g.account_name, 'rankScore', g.rank_score, 'source', g.rank_source, 'roles', g.roles)
                       order by g.game) filter (where g.id is not null), '[]') as accounts
       from profiles p left join game_accounts g on g.profile_id = p.id
-      where lower(p.handle) in (select jsonb_array_elements_text(${this.sql.json(handles.map((h) => h.toLowerCase()))}))
+      where ${where}
       group by p.id`;
-    const byHandle = new Map(rows.map((r) => [String(r.handle).toLowerCase(), r]));
-    return handles.flatMap((h) => {
-      const r = byHandle.get(h.toLowerCase());
-      return r ? [{ handle: r.handle, playerKarma: r.player_karma, hostKarma: r.host_karma, accounts: r.accounts }] : [];
-    });
+    return rows.map((r) => ({ handle: r.handle, playerKarma: r.player_karma, hostKarma: r.host_karma, accounts: r.accounts, lookingForTeam: r.looking_for_team }));
+  }
+
+  async profiles(handles: string[]): Promise<Profile[]> {
+    if (!handles.length) return [];
+    const rows = await this.profileRows(this.sql`lower(p.handle) in (select jsonb_array_elements_text(${this.sql.json(handles.map((h) => h.toLowerCase()))}))`);
+    const byHandle = new Map(rows.map((r) => [r.handle.toLowerCase(), r]));
+    return handles.flatMap((h) => byHandle.get(h.toLowerCase()) ?? []);
+  }
+
+  async directory(): Promise<Profile[]> {
+    return (await this.profileRows(this.sql`true`)).sort((a, b) => a.handle.localeCompare(b.handle));
+  }
+
+  async setLookingForTeam(handle: string, on: boolean): Promise<void> {
+    await this.sql`update profiles set looking_for_team = ${on} where lower(handle) = ${handle.toLowerCase()}`;
+  }
+
+  allRosters(): Promise<Roster[]> {
+    return this.rosterRows(this.sql`true`);
   }
 
   private async rosterRows(where: postgres.PendingQuery<postgres.Row[]>): Promise<Roster[]> {

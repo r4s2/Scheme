@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { FORMAT_NAMES, GAMES, type FormatId, type GameId } from "@/engine";
-import { GameDot } from "@/components/ui/bits";
 import { SearchIcon } from "@/components/ui/icons";
 import { TournamentCard } from "./TournamentCard";
 import type { Card } from "./types";
@@ -33,12 +32,6 @@ export function Library({ cards, hero, aside }: { cards: Card[]; hero: React.Rea
     );
   }, [cards, f]);
 
-  const chip = (g: GameId | "all", label: string) => (
-    <button key={g} type="button" className="chip" aria-pressed={f.game === g} onClick={() => set("game", g)}>
-      {g !== "all" && <GameDot game={g} />}
-      {label}
-    </button>
-  );
 
   return (
     <>
@@ -50,8 +43,14 @@ export function Library({ cards, hero, aside }: { cards: Card[]; hero: React.Rea
             <input type="search" placeholder="Search by tournament, host or game" value={f.q} onChange={(e) => set("q", e.target.value)} aria-label="Search tournaments" />
           </label>
           <div className="filters">
-            {chip("all", "All games")}
-            {(Object.keys(GAMES) as GameId[]).map((g) => chip(g, GAMES[g].name))}
+            <select aria-label="Game" value={f.game} onChange={(e) => set("game", e.target.value as Filters["game"])}>
+              <option value="all">All games</option>
+              {(Object.keys(GAMES) as GameId[]).map((g) => (
+                <option key={g} value={g}>
+                  {GAMES[g].name}
+                </option>
+              ))}
+            </select>
             <select aria-label="Format" value={f.format} onChange={(e) => set("format", e.target.value as Filters["format"])}>
               <option value="all">Any format</option>
               {(Object.keys(FORMAT_NAMES) as FormatId[]).map((k) => (

@@ -17,19 +17,19 @@ Open http://localhost:3000. `npm run dev` recompiles pages as you open them, so 
 
 With no database configured, the app runs on the sample data kept in memory: the same tournaments `npm run db:setup` loads into a database.
 
-- **Browse:** search, game and format filters, and the tournament library: eight events taking sign-ups across all four games.
-- **Leaderboards:** ranked by tournaments won, from forty closed events. The home page rotates through them.
+- **Tournaments** (the home page): search, a game dropdown, format filters, and the tournament library: eight events taking sign-ups across all four games, with a rotating leaderboard ticker.
+- **Teams:** the team and player library, which is also the leaderboard (ranked by tournaments won, from forty closed events). Search, filter by game, sort by wins or rank, and tick **Recruitable only** to see players looking for a team with their ranks.
 - **Friday Night Spike** (Valorant, live): an overdue match, an extension request, and open matches.
 - **Saturday Six-Stack Social** (Marvel Rivals, check-in, $30 entry): two players haven't checked in and subs are waiting.
 
 Use **Acting as** in the top bar to be the host (`kestrel`) or any player. Captains such as `glint` (Hot Coffee) and `lynx` (Backline Bandits) can report results. Things to try:
 
-1. **Host a tournament:** walk the wizard. Name a Marvel Rivals event "Saturday Night Cup" to see NetEase's name rules block it and suggest alternatives, then publish.
+1. **Host a tournament:** on **My tournaments**, press **Host a tournament**. The setup is one form; jump to any section from the list on the left. Name a Marvel Rivals event "Saturday Night Cup" to see NetEase's name rules block it and suggest alternatives, then publish.
 2. **Sign up:** as `glint`, open Ascendant Ladder Night and register Hot Coffee from the saved team in one step. As `zorra`, join Strategist Social solo.
-3. **The live board:** as `kestrel` on Friday Night Spike, drag a first-round team onto another (or click one, then the other), randomize, auto-seed, change the format, or enter a result right on a match. Teams glide into place and save in the background, with Undo. Hover any team for its roster, ranks, karma and wins.
+3. **The live board:** as `kestrel` on Friday Night Spike, drag a first-round team onto another (or click one, then the other), randomize, auto-seed, change the format, or enter a result right on a match. Teams glide into place and save in the background, with Undo; you never wait between moves. If a save gets no answer, the board dims with a spinner while it reloads. Hover any team for its roster, ranks, karma and wins.
 4. **Match desk:** as `glint`, report Hot Coffee winning M4; as `lynx`, report the opposite; as `kestrel`, settle the dispute and approve the extension request.
 5. **Tickets and announcements:** as `glint`, open a ticket; as `kestrel`, reply and post an announcement. Watch the bell.
-6. **Teams and profiles:** create a team on **Teams**, invite someone, switch to them and accept. Open any player's profile from a leaderboard.
+6. **Teams and profiles:** create a team on **Teams**, switch to **Players**, tick **Recruitable only** and invite someone straight from the list, then switch to them and accept. On your own profile, turn **I'm looking for a team** on or off.
 7. **Close** an event, then switch to a player on the winning team (`ember` on Tilt Proof, say) for the winner popup.
 
 Demo data resets when the server restarts.
@@ -42,7 +42,7 @@ Demo data resets when the server restarts.
 | `src/server/operations.ts` | Every tournament operation: check-in, start, results, reports, disputes, extensions, forfeits, bracket edits, close, cancel, payout claims, and background jobs. Pure functions with permission checks. |
 | `src/server/store/` | Where tournaments are saved: in memory for the demo, or Postgres with version checks so simultaneous edits can't overwrite each other. |
 | `src/server/views.ts` | Read-only views for pages, like the host's match desk. |
-| `src/app/` | Pages: browse (search, filters, library, leaderboard ticker), leaderboards, my tournaments, notifications, and `t/[id]`, the tournament page with its server actions: registration, bracket, match desk, check-in, close, change log, player match page. |
+| `src/app/` | Pages: tournaments (search, filters, library, leaderboard ticker), my tournaments (with hosting), teams (library and leaderboard), notifications, and `t/[id]`, the tournament page with its server actions: registration, bracket, match desk, check-in, close, change log, player match page. |
 | `src/components/bracket/` | The bracket board: match cards, wires, status, team hover cards and drag-to-swap. |
 | `src/server/create.ts` | The creation wizard's draft, its checks (publisher rules, schedule, setup), and publishing. |
 | `src/server/registration.ts` | Team and solo sign-up with rank, verification and karma checks; building balanced teams from solo sign-ups. |

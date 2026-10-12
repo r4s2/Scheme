@@ -61,6 +61,12 @@ describe.skipIf(!url)("seed.sql matches demo mode", () => {
     }
   });
 
+  it("has the same player directory and team library", async () => {
+    expect(await db.directory()).toEqual(await mem.directory());
+    const strip = (rs: Awaited<ReturnType<typeof db.allRosters>>) => rs.map(({ id, ...r }) => (void id, r)).sort((a, b) => `${a.game}${a.name}`.localeCompare(`${b.game}${b.name}`));
+    expect(strip(await db.allRosters())).toEqual(strip(await mem.allRosters()));
+  });
+
   it("has the same announcements and tickets", async () => {
     const fns = (await db.list()).find((t) => t.name === MUTATED)!;
     const [x, y] = [(await db.get(fns.id))!, (await mem.get("friday-night-spike"))!];

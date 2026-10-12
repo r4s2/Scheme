@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   averageScore,
@@ -68,7 +69,12 @@ type Rects = Map<string, DOMRect>;
 export function BracketBoard(props: BracketBoardProps) {
   const { game, tid, host, mine, wins = {}, phase = "play" } = props;
   const [view, setView] = useState<View>({ state: props.state, version: props.version ?? 0 });
-  const [busy, setBusy] = useState(false);
+  const confirmed = useRef<View>({ state: props.state, version: props.version ?? 0 });
+  const queue = useRef<{ fields: Record<string, string>; undo?: () => void }[]>([]);
+  const running = useRef(false);
+  const [pending, setPending] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const router = useRouter();
   const [selected, setSelected] = useState<number | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -78,8 +84,17 @@ export function BracketBoard(props: BracketBoardProps) {
 
   // New data from the server (someone else's change, or the page refreshing) replaces ours when it's newer.
   useEffect(() => {
-    if (!busy && (props.version ?? 0) > view.version) setView({ state: props.state, version: props.version ?? 0 });
-  }, [props.version, props.state, busy, view.version]);
+    if (queue.current.length || (props.version ?? 0) <= confirmed.current.version) return;
+    confirmed.current = { state: props.state, version: props.version ?? 0 };
+    setView(confirmed.current);
+    setSyncing(false);
+  }, [props.version, props.state]);
+  // A reload that brings nothing newer still ends the wait.
+  useEffect(() => {
+    if (!syncing) return;
+    const t = setTimeout(() => setSyncing(false), 4000);
+    return () => clearTimeout(t);
+  }, [syncing]);
 
   const bracket = useMemo(() => buildBracket(state), [state]);
   const locked = useMemo(() => (host?.arrange ? lockedSlots(state, state.slots, state.format) : new Set<number>()), [host?.arrange, state]);
@@ -157,34 +172,61 @@ export function BracketBoard(props: BracketBoardProps) {
   // ---------------------------------------------------------------------------
   // Saving: show the change now, save it, and settle on what the server stored.
 
-  const save = useCallback(
-    async (next: TournamentState, fields: Record<string, string>, opts: { flip?: Rects; undo?: () => void } = {}) => {
-      if (!tid) return;
-      const before = view;
-      flipFrom.current = opts.flip ?? capture();
-      setView({ state: next, version: before.version });
-      setBusy(true);
+  // Moves never wait for each other: each one shows straight away and joins a queue that saves in
+  // order, each save building on the version the previous one stored. If a save is refused, the rest
+  // of the queue is dropped and the board slides back to what's stored.
+
+  const drain = useCallback(async () => {
+    if (running.current || !tid) return;
+    running.current = true;
+    while (queue.current.length) {
+      const job = queue.current[0];
       const fd = new FormData();
       fd.set("tournamentId", tid);
-      fd.set("version", String(before.version));
-      for (const [k, v] of Object.entries(fields)) fd.set(k, v);
-      let res: OpResult;
+      fd.set("version", String(confirmed.current.version));
+      for (const [k, v] of Object.entries(job.fields)) fd.set(k, v);
+      let res: OpResult | null;
       try {
         res = await runOp(null, fd);
       } catch {
-        res = { ok: false, message: "Couldn't save that. Check your connection and try again.", at: Date.now() };
+        res = null;
       }
-      setBusy(false);
-      if (res.ok && res.state) {
-        setView({ state: res.state, version: res.version ?? before.version + 1 });
-        toast({ message: res.message, undo: opts.undo });
+      queue.current.shift();
+      if (res?.ok && res.state) {
+        confirmed.current = { state: res.state, version: res.version ?? confirmed.current.version + 1 };
+        // Only settle on the server's copy once nothing newer is waiting to save.
+        if (!queue.current.length) setView(confirmed.current);
+        toast({ message: res.message, undo: job.undo });
       } else {
+        queue.current = [];
         flipFrom.current = capture();
-        setView(res.state ? { state: res.state, version: res.version ?? before.version } : before);
-        toast({ message: res.message, tone: "err" });
+        if (res?.state) {
+          confirmed.current = { state: res.state, version: res.version ?? confirmed.current.version };
+          setView(confirmed.current);
+          toast({ message: res.message, tone: "err" });
+        } else {
+          // No answer at all: the board can't know what's stored, so it waits for the page to reload its data.
+          setView(confirmed.current);
+          setSyncing(true);
+          toast({ message: "Couldn't save that. Check your connection; the board is reloading.", tone: "err" });
+          router.refresh();
+        }
       }
+      setPending(queue.current.length);
+    }
+    running.current = false;
+  }, [tid, capture, router]);
+
+  const save = useCallback(
+    (next: TournamentState, fields: Record<string, string>, opts: { flip?: Rects; undo?: () => void } = {}) => {
+      if (!tid || syncing) return;
+      flipFrom.current = opts.flip ?? capture();
+      setView((v) => ({ state: next, version: v.version }));
+      queue.current.push({ fields, undo: opts.undo });
+      setPending(queue.current.length);
+      void drain();
     },
-    [tid, view, capture],
+    [tid, syncing, capture, drain],
   );
 
   const arrange = useCallback(
@@ -209,7 +251,7 @@ export function BracketBoard(props: BracketBoardProps) {
 
   const swap = (a: number, b: number, flip?: Rects) => {
     setSelected(null);
-    if (busy || a === b) return;
+    if (a === b) return;
     const r = swapSlots(state, a, b);
     if (!r.ok) return toast({ message: r.reason, tone: "err" });
     arrange(r.slots, state.format, "swap", flip);
@@ -298,7 +340,7 @@ export function BracketBoard(props: BracketBoardProps) {
     };
   });
 
-  const canMove = (slot: number | undefined) => !!host?.arrange && !busy && slot !== undefined && !locked.has(slot);
+  const canMove = (slot: number | undefined) => !!host?.arrange && !syncing && slot !== undefined && !locked.has(slot);
 
   const pick = (slot: number) => {
     if (suppressClick.current) return;
@@ -420,14 +462,14 @@ export function BracketBoard(props: BracketBoardProps) {
           (!r || canReopen(state, bracket, m)) && (
             <div className="match-foot">
               {!r ? (
-                <button type="button" className="btn xs" disabled={busy} onClick={() => setEntering(m.id)}>
+                <button type="button" className="btn xs" disabled={syncing} onClick={() => setEntering(m.id)}>
                   Enter result
                 </button>
               ) : (
                 <button
                   type="button"
                   className="btn xs ghost"
-                  disabled={busy}
+                  disabled={syncing}
                   onClick={() => void save(reopenResult(state, m.id), { op: "reopen", matchId: m.id })}
                   title="Clear this result so it can be entered again"
                 >
@@ -506,7 +548,8 @@ export function BracketBoard(props: BracketBoardProps) {
     <>
       {host?.arrange && tid && (
         <Toolbar
-          busy={busy}
+          busy={syncing}
+          saving={pending > 0}
           format={state.format}
           canTransform={tf}
           lockedCount={locked.size}
@@ -525,7 +568,13 @@ export function BracketBoard(props: BracketBoardProps) {
         />
       )}
       <HoverLayer teams={hover} paused={dragging}>
-        <div ref={root} className={`board ${busy ? "saving" : ""} ${dragging ? "is-dragging" : ""}`} aria-busy={busy}>
+        <div ref={root} className={`board ${syncing ? "syncing" : ""} ${dragging ? "is-dragging" : ""}`} aria-busy={pending > 0 || syncing}>
+          {syncing && (
+            <div className="board-wait" role="status">
+              <span className="spinner" aria-hidden="true" />
+              <span className="sr-only">Reloading the bracket</span>
+            </div>
+          )}
           {bracket.parts.map((part, i) => {
             if (part.kind === "bracket" || part.kind === "swiss") {
               const flat = part.kind === "swiss";
@@ -595,6 +644,7 @@ export function BracketBoard(props: BracketBoardProps) {
 
 function Toolbar({
   busy,
+  saving,
   format,
   canTransform: tf,
   lockedCount,
@@ -604,6 +654,7 @@ function Toolbar({
   onTransform,
 }: {
   busy: boolean;
+  saving: boolean;
   format: FormatId;
   canTransform: boolean;
   lockedCount: number;
@@ -641,6 +692,8 @@ function Toolbar({
       </span>
       <span className="hint" aria-live="polite">
         {busy
+          ? "Reloading the bracket…"
+          : saving
           ? "Saving…"
           : picking
             ? `Picked up ${picking}. Pick another team to swap, or press Esc.`

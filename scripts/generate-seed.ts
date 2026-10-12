@@ -140,8 +140,8 @@ insert into auth.users (id, email) values
 ${values(people.map((h) => [q(userId(h)), q(`${h.toLowerCase()}@example.test`)]))}
 on conflict do nothing;
 
-insert into profiles (id, handle, attested_13_plus, verified_18_plus, player_karma, host_karma) values
-${values(people.map((h) => [q(userId(h)), q(h), "true", "true", String(demoKarma(h)), String(DEMO_HOST_KARMA[h] ?? 70)]))}
+insert into profiles (id, handle, attested_13_plus, verified_18_plus, player_karma, host_karma, looking_for_team) values
+${values(people.map((h) => [q(userId(h)), q(h), "true", "true", String(demoKarma(h)), String(DEMO_HOST_KARMA[h] ?? 70), String(!!profiles.find((p) => p.handle === h)?.lookingForTeam)]))}
 on conflict do nothing;
 
 insert into game_accounts (profile_id, game, external_id, account_name, rank_score, roles, rank_source, verified_at) values

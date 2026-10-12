@@ -6,7 +6,7 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
-import { buildBracket, findMatch, GAMES, resultOf } from "@/engine";
+import { buildBracket, findMatch, GAMES, lockedSlots, resultOf } from "@/engine";
 import { openTicket, postAnnouncement, replyTicket } from "../community";
 import { createTournament, newDraft } from "../create";
 import { joinSolo, leaveSolo, registerTeam, withdrawTeam } from "../registration";
@@ -54,6 +54,22 @@ describe.skipIf(!url)("PostgresStore (integration)", () => {
     expect(resultOf(agg.state, findMatch(buildBracket(agg.state), "M4"))).toMatchObject({ winner: hc, by: "reports" });
     const log = await store.auditLog(tid);
     expect(log.some((e) => e.action === "result.record" && e.summary.includes("M4"))).toBe(true);
+  });
+
+  it("returns from a save exactly what a fresh load would read", async () => {
+    const norm = (t: TournamentAgg) => ({
+      ...t,
+      state: { ...t.state, teams: Object.fromEntries(Object.entries(t.state.teams).map(([k, v]) => [k, { ...v, players: [...v.players].sort((a, b) => a.handle.localeCompare(b.handle)) }])) },
+    });
+    let agg = (await store.get(tid))!;
+    const slots = [...agg.state.slots];
+    const free = slots.map((_, i) => i).filter((i) => !lockedSlots(agg.state, slots, agg.state.format).has(i));
+    [slots[free[0]], slots[free[1]]] = [slots[free[1]], slots[free[0]]];
+    agg = await store.commit(agg, op.arrangeBracket(agg, ctx("kestrel"), slots, agg.state.format, "swap"));
+    expect(norm(agg)).toEqual(norm((await store.get(tid))!));
+    agg = await store.commit(agg, op.arrangeBracket(agg, ctx("kestrel"), [...agg.state.slots], "double", "transform"));
+    expect(norm(agg)).toEqual(norm((await store.get(tid))!));
+    agg = await store.commit(agg, op.arrangeBracket(agg, ctx("kestrel"), [...agg.state.slots], "single", "undo"));
   });
 
   it("rejects a save from a stale copy", async () => {
@@ -131,6 +147,13 @@ describe.skipIf(!url)("PostgresStore (integration)", () => {
     expect((await store.get(s.id))!.pool.map((p) => p.handle)).toContain("kestrel");
     agg = await store.commit(agg, leaveSolo(agg, ctx("kestrel")));
     expect((await store.get(s.id))!.pool).toHaveLength(before);
+  });
+
+  it("saves whether a player is looking for a team", async () => {
+    await store.setLookingForTeam("ember", true);
+    expect((await store.profiles(["ember"]))[0].lookingForTeam).toBe(true);
+    await store.setLookingForTeam("ember", false);
+    expect((await store.directory()).find((p) => p.handle === "ember")!.lookingForTeam).toBe(false);
   });
 
   it("saves teams, invites and notifications", async () => {

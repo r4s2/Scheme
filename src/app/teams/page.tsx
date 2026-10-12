@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { GAMES, rankName, rankShortName, type GameId } from "@/engine";
+import { hoverTeam, type HoverTeam } from "@/components/bracket/hover";
+import { TeamLibrary, type PlayerRow, type TeamRow } from "@/components/teams/TeamLibrary";
 import { TeamOp } from "@/components/teams/TeamOp";
 import { GameBadge } from "@/components/ui/bits";
 import { getStore } from "@/server/store";
@@ -8,8 +10,8 @@ import { currentActor } from "@/server/session";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Teams · Scheme" };
 
-export default async function TeamsPage() {
-  const actor = await currentActor();
+export default async function TeamsPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
+  const [actor, sp] = await Promise.all([currentActor(), searchParams]);
   if (!actor) {
     return (
       <main>
@@ -21,10 +23,42 @@ export default async function TeamsPage() {
     );
   }
   const store = getStore();
-  const [rosters, wins] = await Promise.all([store.rosters(actor), store.wins()]);
-  const handles = [...new Set(rosters.flatMap((r) => r.members.map((m) => m.handle)))];
-  const profiles = new Map((await store.profiles(handles)).map((p) => [p.handle.toLowerCase(), p]));
+  const [rosters, wins, everyone, directory] = await Promise.all([store.rosters(actor), store.wins(), store.allRosters(), store.directory()]);
+  const profiles = new Map(directory.map((p) => [p.handle.toLowerCase(), p]));
   const rankOf = (h: string, g: GameId) => profiles.get(h.toLowerCase())?.accounts.find((a) => a.game === g)?.rankScore;
+  const winsOf = (game: GameId, name: string) => wins.filter((w) => w.game === game && w.team.toLowerCase() === name.toLowerCase()).length;
+  const library: TeamRow[] = everyone.map((r) => {
+    const active = r.members.filter((m) => m.status === "active");
+    const ranks = active.flatMap((m) => rankOf(m.handle, r.game) ?? []);
+    return { id: r.id, name: r.name, game: r.game, captain: r.captain, members: active.length, avg: ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : null, wins: winsOf(r.game, r.name) };
+  });
+  const hover: Record<string, HoverTeam> = Object.fromEntries(
+    everyone.map((r) => {
+      const players = r.members
+        .filter((m) => m.status === "active")
+        .flatMap((m) => {
+          const p = profiles.get(m.handle.toLowerCase());
+          const a = p?.accounts.find((x) => x.game === r.game);
+          return a ? [{ handle: m.handle, role: m.role ?? a.roles[0] ?? "", score: a.rankScore, verified: a.source, checkedIn: true, karma: p!.playerKarma }] : [];
+        });
+      const h = hoverTeam({ id: r.id, name: r.name, captain: r.captain, players }, r.game, winsOf(r.game, r.name));
+      return [r.id, { ...h, stateLabel: "Saved team", stateTone: "info" as const }];
+    }),
+  );
+  const teamNamesOf = new Map<string, string[]>();
+  for (const r of everyone) for (const m of r.members) if (m.status === "active") teamNamesOf.set(m.handle.toLowerCase(), [...(teamNamesOf.get(m.handle.toLowerCase()) ?? []), r.name]);
+  const winCount = new Map<string, number>();
+  for (const w of wins) for (const h of w.players) winCount.set(h.toLowerCase(), (winCount.get(h.toLowerCase()) ?? 0) + 1);
+  const players: PlayerRow[] = directory
+    .filter((p) => p.accounts.length > 0)
+    .map((p) => ({
+      handle: p.handle,
+      accounts: p.accounts.map((a) => ({ game: a.game, score: a.rankScore, verified: a.source === "api" })),
+      wins: winCount.get(p.handle.toLowerCase()) ?? 0,
+      karma: p.playerKarma,
+      recruitable: p.lookingForTeam,
+      teams: teamNamesOf.get(p.handle.toLowerCase()) ?? [],
+    }));
   const invites = rosters.filter((r) => r.members.some((m) => m.handle === actor && m.status === "invited"));
   const teams = rosters.filter((r) => !invites.includes(r));
 
@@ -32,9 +66,12 @@ export default async function TeamsPage() {
     <main>
       <div className="section-h" style={{ marginTop: 0 }}>
         <h1 className="page-title">Teams</h1>
+        <a href="#create-team" className="btn primary">
+          Create a team
+        </a>
       </div>
-      <p className="muted" style={{ margin: "-4px 0 18px", maxWidth: "60ch" }}>
-        Saved teams register for events in one step. Scheme checks every member&apos;s linked rank against an event&apos;s requirements when you register.
+      <p className="muted" style={{ margin: "-4px 0 18px", maxWidth: "64ch" }}>
+        Your teams, every team and player on Scheme, and the leaderboard in one place. Saved teams register for events in one step.
       </p>
 
       {invites.length > 0 && (
@@ -58,6 +95,10 @@ export default async function TeamsPage() {
         </div>
       )}
 
+      <div className="section-h">
+        <h2>Your teams</h2>
+        <span className="muted small">{teams.length}</span>
+      </div>
       <div className="teams-grid">
         {teams.map((r) => {
           const ranks = r.members.flatMap((m) => rankOf(m.handle, r.game) ?? []);
@@ -132,7 +173,7 @@ export default async function TeamsPage() {
             </div>
           );
         })}
-        <div className="card panel" style={{ margin: 0, borderStyle: "dashed" }}>
+        <div id="create-team" className="card panel" style={{ margin: 0, borderStyle: "dashed", scrollMarginTop: 90 }}>
           <h3 style={{ fontSize: 17 }}>Create a team</h3>
           <p className="small muted" style={{ margin: "4px 0 12px" }}>
             You&apos;ll be captain. Invite teammates once it&apos;s made.
@@ -157,6 +198,16 @@ export default async function TeamsPage() {
             </div>
           </TeamOp>
         </div>
+            </div>
+
+      <div style={{ marginTop: 28 }}>
+        <TeamLibrary
+          teams={library}
+          players={players}
+          hover={hover}
+          myRosters={teams.filter((r) => r.captain === actor).map((r) => ({ id: r.id, name: r.name, game: r.game, members: r.members.map((m) => m.handle) }))}
+          initialView={sp.view === "players" ? "players" : "teams"}
+        />
       </div>
     </main>
   );

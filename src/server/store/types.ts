@@ -63,6 +63,11 @@ export interface Store {
   create(agg: TournamentAgg, effects: Effects): Promise<TournamentAgg>;
   /** Profiles with their game accounts; unknown handles are left out. */
   profiles(handles: string[]): Promise<Profile[]>;
+  /** Every player with their linked accounts, for the Teams page's player directory. */
+  directory(): Promise<Profile[]>;
+  setLookingForTeam(handle: string, on: boolean): Promise<void>;
+  /** Every saved team, for the team library. */
+  allRosters(): Promise<Roster[]>;
   /** Saved teams the player captains or belongs to (including pending invites). */
   rosters(handle: string): Promise<Roster[]>;
   roster(id: string): Promise<Roster | null>;

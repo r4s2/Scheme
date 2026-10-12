@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { toCards } from "@/components/home/cards";
 import { TournamentCard } from "@/components/home/TournamentCard";
+import { Wizard } from "@/components/host/Wizard";
 import { listTournaments } from "@/server/data";
+import { getStore } from "@/server/store";
 import { currentActor } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "My tournaments · Scheme" };
 
-export default async function Mine() {
-  const actor = await currentActor();
+export default async function Mine({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  const [actor, sp] = await Promise.all([currentActor(), searchParams]);
   if (!actor) {
     return (
       <main>
@@ -19,7 +21,8 @@ export default async function Mine() {
       </main>
     );
   }
-  const list = await listTournaments();
+  const hostingNew = sp.new === "1";
+  const [list, [me]] = await Promise.all([listTournaments(), hostingNew ? getStore().profiles([actor]) : Promise.resolve([])]);
   const now = new Date();
   const active = (s: string) => s !== "complete" && s !== "cancelled";
   const hosting = list.filter((t) => t.host === actor);
@@ -31,10 +34,26 @@ export default async function Mine() {
   ];
   return (
     <main>
-      <h1 className="page-title">My tournaments</h1>
-      <p className="muted" style={{ marginTop: 6 }}>
+      <div className="section-h" style={{ marginTop: 0 }}>
+        <h1 className="page-title">My tournaments</h1>
+        {hostingNew ? (
+          <Link href="/mine" className="btn">
+            Cancel
+          </Link>
+        ) : (
+          <Link href="/mine?new=1" className="btn primary">
+            Host a tournament
+          </Link>
+        )}
+      </div>
+      <p className="muted" style={{ marginTop: -4 }}>
         Everything you host or play in, as <b style={{ color: "var(--ink)" }}>{actor}</b>.
       </p>
+      {hostingNew && (
+        <section style={{ marginTop: 18 }} aria-label="Host a tournament">
+          <Wizard hostKarma={me?.hostKarma ?? 70} now={new Date().toISOString()} />
+        </section>
+      )}
       {sections.map(([title, items, empty]) => (
         <section key={title}>
           <div className="section-h">

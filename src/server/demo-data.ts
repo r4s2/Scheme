@@ -407,11 +407,13 @@ const KESTREL_ACCOUNTS: [GameId, number][] = [["val", 18], ["mr", 14], ["ow", 17
  * event: open and live events first, then the newest closed one.
  */
 export function demoProfiles(all: TournamentAgg[]): Profile[] {
+  // Solo sign-ups and subs in open events are the ones looking for a team.
+  const freeAgents = new Set(all.filter((t) => t.status !== "complete" && t.status !== "cancelled").flatMap((t) => [...t.pool, ...t.subs].map((p) => p.handle)));
   const byCurrency = [...all].sort((a, b) => rankOrder(a) - rankOrder(b) || b.startsAt.localeCompare(a.startsAt));
   const profiles = new Map<string, Profile>();
   const get = (h: string) => {
     let p = profiles.get(h);
-    if (!p) profiles.set(h, (p = { handle: h, playerKarma: demoKarma(h), hostKarma: DEMO_HOST_KARMA[h] ?? 70, accounts: [] }));
+    if (!p) profiles.set(h, (p = { handle: h, playerKarma: demoKarma(h), hostKarma: DEMO_HOST_KARMA[h] ?? 70, accounts: [], lookingForTeam: freeAgents.has(h) }));
     return p;
   };
   for (const t of byCurrency) {

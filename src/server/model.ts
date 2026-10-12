@@ -97,6 +97,8 @@ export interface Profile {
   playerKarma: number;
   hostKarma: number;
   accounts: GameAccount[];
+  /** Open to joining a team; shown to captains as recruitable. */
+  lookingForTeam: boolean;
 }
 
 /** A saved team: a captain and members who play one game together across events. */

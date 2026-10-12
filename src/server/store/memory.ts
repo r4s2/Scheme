@@ -84,6 +84,19 @@ export class MemoryStore implements Store {
     });
   }
 
+  async directory(): Promise<Profile[]> {
+    return [...this.profileMap.values()].map((p) => structuredClone(p)).sort((a, b) => a.handle.localeCompare(b.handle));
+  }
+
+  async setLookingForTeam(handle: string, on: boolean): Promise<void> {
+    const p = this.profileMap.get(handle.toLowerCase());
+    if (p) p.lookingForTeam = on;
+  }
+
+  async allRosters(): Promise<Roster[]> {
+    return [...this.rosterMap.values()].map((r) => this.sortedRoster(r)).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   async rosters(handle: string): Promise<Roster[]> {
     const h = handle.toLowerCase();
     return [...this.rosterMap.values()]

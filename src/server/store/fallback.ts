@@ -124,6 +124,18 @@ export class FallbackStore implements Store {
     return this.read((s) => s.profiles(handles));
   }
 
+  directory(): Promise<Profile[]> {
+    return this.read((s) => s.directory());
+  }
+
+  setLookingForTeam(handle: string, on: boolean): Promise<void> {
+    return this.write((s) => s.setLookingForTeam(handle, on));
+  }
+
+  allRosters(): Promise<Roster[]> {
+    return this.read((s) => s.allRosters());
+  }
+
   rosters(handle: string): Promise<Roster[]> {
     return this.read((s) => s.rosters(handle));
   }

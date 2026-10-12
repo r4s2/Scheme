@@ -65,7 +65,7 @@ export function Ticker({ boards, missing }: { boards: Board[]; missing: string[]
       )}
       <div className="row" style={{ justifyContent: "space-between" }}>
         <p className="tiny muted">{missing.length ? `${missing.join(" and ")} join${missing.length === 1 ? "s" : ""} after ${missing.length === 1 ? "its" : "their"} first completed tournament.` : ""}</p>
-        <Link href="/leaderboards" className="btn xs">
+        <Link href="/teams" className="btn xs">
           Full leaderboards
         </Link>
       </div>
