@@ -1,12 +1,12 @@
 import "server-only";
 import { demoProfiles, demoRosters, demoTournaments } from "../demo-data";
-import { FallbackStore } from "./fallback";
+import { FallbackStore, type DbProblem } from "./fallback";
 import { MemoryStore } from "./memory";
 import { PostgresStore } from "./postgres";
 import type { Store } from "./types";
 
 export * from "./types";
-export { DatabaseUnavailableError } from "./fallback";
+export { DatabaseUnavailableError, describeDbError, type DbProblem } from "./fallback";
 
 type Cache = { __schemeStore?: Store; __schemeStoreUrl?: string };
 
@@ -51,7 +51,7 @@ export function getStore(): Store {
               console.warn(
                 online
                   ? "[scheme] Connected to the database."
-                  : `[scheme] Can't reach the database (${reason ?? "unknown error"}). Showing demo data; retrying every 30 seconds.`,
+                  : `[scheme] ${reason ?? "Can't reach the database."} Showing demo data; retrying every 30 seconds.`,
               ),
           })
         : PostgresStore.fromUrl(url);
@@ -64,4 +64,10 @@ export function storeMode(): StoreMode {
   const s = getStore() as Store & { online?: boolean; close?: unknown };
   if (typeof s.online === "boolean") return s.online ? "database" : "offline";
   return typeof s.close === "function" ? "database" : "demo";
+}
+
+/** While offline in development: why the database can't be used. */
+export function storeProblem(): DbProblem | null {
+  const s = getStore() as Store & { problem?: DbProblem | null };
+  return s.problem ?? null;
 }

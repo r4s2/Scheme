@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { demoTournaments } from "../demo-data";
 import type { TournamentAgg } from "../model";
-import { DatabaseUnavailableError, FallbackStore, isConnectionError } from "../store/fallback";
+import { DatabaseUnavailableError, describeDbError, FallbackStore, isConnectionError } from "../store/fallback";
 import { MemoryStore } from "../store/memory";
 import type { Store } from "../store/types";
 
@@ -49,6 +49,7 @@ describe("development fallback store", () => {
     net.up = false;
     expect(await names(store)).toContain("Friday Night Spike");
     expect(store.online).toBe(false);
+    expect(store.problem).toMatchObject({ kind: "network", message: expect.stringMatching(/from this network \(CONNECT_TIMEOUT\)/) });
 
     net.up = true;
     tick(10_000);
@@ -100,5 +101,14 @@ describe("development fallback store", () => {
     expect(isConnectionError(Object.assign(new Error("x"), { code: "ECONNREFUSED" }))).toBe(true);
     expect(isConnectionError(Object.assign(new Error("relation does not exist"), { code: "42P01" }))).toBe(false);
     expect(isConnectionError(null)).toBe(false);
+  });
+});
+
+describe("explaining why the database is offline", () => {
+  it("tells a blocked network from a paused project or a bad password", () => {
+    expect(describeDbError(Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" })).kind).toBe("network");
+    expect(describeDbError(Object.assign(new Error("Tenant or user not found"), { code: "XX000" }))).toMatchObject({ kind: "paused", message: expect.stringMatching(/Supabase dashboard/) });
+    expect(describeDbError(Object.assign(new Error('password authentication failed for user "postgres"'), { code: "28P01" })).kind).toBe("password");
+    expect(describeDbError(new Error("something odd"))).toEqual({ kind: "other", message: "The database refused the connection: something odd" });
   });
 });

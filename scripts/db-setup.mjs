@@ -65,8 +65,14 @@ async function main() {
   try {
     await sql`select 1`;
   } catch (e) {
-    console.error(`Couldn't reach the database at ${host} (${e.code ?? e.message}).`);
-    console.error("If you're on guest or office Wi-Fi, it may block database traffic. Try another network.");
+    console.error(`Couldn't connect to the database at ${host} (${e.code ?? "error"}: ${e.message}).`);
+    if (/tenant or user not found/i.test(e.message)) {
+      console.error("Supabase doesn't recognize this project. Free projects pause after a week without use: restore it from the Supabase dashboard.");
+    } else if (e.code === "28P01") {
+      console.error("The password in DATABASE_URL was rejected. Copy the connection string from Supabase again.");
+    } else {
+      console.error("If you're on guest or office Wi-Fi, it may block database traffic. Try another network.");
+    }
     process.exit(1);
   }
   console.log(`Connected to ${host}.`);

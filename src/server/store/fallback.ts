@@ -23,6 +23,31 @@ export function isConnectionError(e: unknown): boolean {
   return typeof code === "string" && CONNECTION_CODES.has(code);
 }
 
+/** Why the database couldn't be used, in words the person running Scheme can act on. */
+export interface DbProblem {
+  kind: "network" | "paused" | "password" | "other";
+  message: string;
+}
+
+export function describeDbError(e: unknown): DbProblem {
+  const err = (e ?? {}) as { code?: unknown; message?: unknown };
+  const code = typeof err.code === "string" ? err.code : "";
+  const text = typeof err.message === "string" ? err.message : String(e);
+  if (/tenant or user not found/i.test(text)) {
+    return {
+      kind: "paused",
+      message: "Supabase doesn't recognize the project in DATABASE_URL. Free projects pause after a week without use: restore it from the Supabase dashboard, then reload.",
+    };
+  }
+  if (code === "28P01" || /password authentication failed/i.test(text)) {
+    return { kind: "password", message: "The database rejected the password in .env.local. Check DATABASE_URL against Supabase's connection string." };
+  }
+  if (CONNECTION_CODES.has(code)) {
+    return { kind: "network", message: `Can't reach the database from this network (${code}). Guest and office Wi-Fi often block database traffic; try another network.` };
+  }
+  return { kind: "other", message: `The database refused the connection: ${text}` };
+}
+
 export class DatabaseUnavailableError extends Error {
   constructor() {
     super("Lost the connection to the database, so nothing was saved. Reload the page to continue on demo data.");
@@ -71,12 +96,20 @@ export class FallbackStore implements Store {
     return this.state === "up";
   }
 
+  /** Why the last check failed, while offline. */
+  get problem(): DbProblem | null {
+    return this.state === "down" ? this.lastProblem : null;
+  }
+
+  private lastProblem: DbProblem | null = null;
+
   private get demo(): Store {
     return (this.demoStore ??= this.makeDemo());
   }
 
-  private setState(next: "up" | "down", reason?: string) {
-    if (next !== this.state) this.opts.onChange?.(next === "up", reason);
+  private setState(next: "up" | "down", error?: unknown) {
+    if (next === "down") this.lastProblem = describeDbError(error);
+    if (next !== this.state) this.opts.onChange?.(next === "up", next === "down" ? this.lastProblem!.message : undefined);
     this.state = next;
   }
 
@@ -84,7 +117,7 @@ export class FallbackStore implements Store {
     this.checking ??= this.ping()
       .then(
         () => this.setState("up"),
-        (e: unknown) => this.setState("down", (e as Error)?.message),
+        (e: unknown) => this.setState("down", e),
       )
       .finally(() => {
         this.lastCheck = this.now();
@@ -101,7 +134,7 @@ export class FallbackStore implements Store {
 
   private markDown(e: unknown) {
     this.lastCheck = this.now();
-    this.setState("down", (e as Error)?.message);
+    this.setState("down", e);
   }
 
   /** Reads fall back to demo data if the connection drops mid-request. */

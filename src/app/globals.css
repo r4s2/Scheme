@@ -61,7 +61,7 @@ a { color: var(--accent); }
 .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); border-bottom: 1px solid var(--line); }
 .topbar-inner { max-width: 1340px; margin: 0 auto; padding-inline: 16px; height: 60px; display: flex; align-items: center; gap: 12px; position: relative; }
 .logo { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--f-display); font-weight: 700; font-size: 19px; letter-spacing: -0.02em; }
-.logo svg { width: 24px; height: 24px; }
+.logo svg { width: 28px; height: 28px; }
 .nav { display: flex; gap: 2px; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .navlink { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; color: var(--muted); font-weight: 500; }
