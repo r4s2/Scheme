@@ -42,6 +42,12 @@ export interface Team {
    * opponents can check who's on the roster against a result screenshot.
    */
   bench?: Player[];
+  /**
+   * Set when the host rejects the team at check-in (the reason given). The
+   * team keeps its bracket spot so the bracket stays whole, and forfeits
+   * every match it would play.
+   */
+  rejected?: string;
 }
 
 export type ResultSource = "reports" | "host" | "auto" | "dispute" | "forfeit";

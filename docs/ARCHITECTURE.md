@@ -48,6 +48,10 @@ Pages are server components that read through the store; the interactive parts (
 
 Forms run in place: each calls a server action that runs one operation, saves, and returns a message (shown as a notice) while the page's data refreshes without navigating. The bracket board goes further: it computes a move with the same engine functions the server uses, shows it straight away (teams animate to their new spots), and saves in the background with the version it started from. If someone else saved first, the server refuses and the board settles on what's stored. Listing a tournament never loads the whole tournament: the library, leaderboards and "Acting as" list each come from one query.
 
+## Layout switches
+
+`src/config/layout.ts` holds the tournament page's layout experiments. `bracketHub` puts the event's numbers on the Bracket tab (a strip above the board, team strength folded below it) instead of a Stats tab; `deskHub` gives the host one Match desk with the queue, announcements, tickets and closing, instead of separate tabs. Setting either to false restores the old tabs; the components for both layouts stay in the code.
+
 ## Result keys
 
 A match result is stored under the engine's `resultKey`: the two team ids sorted by code point and joined with `|`, prefixed by stage when two teams could meet again (`L:` lower bracket, `GF:` grand final, `P:` playoffs). In SQL, sort with `collate "C"` to match JavaScript's sort.

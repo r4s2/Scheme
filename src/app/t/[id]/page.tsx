@@ -14,7 +14,9 @@ import { Announcements, Tickets } from "@/components/tournament/Community";
 import { Registration, type SignupContext } from "@/components/tournament/Registration";
 import { Rosters } from "@/components/tournament/Rosters";
 import { Hidden, Op } from "@/components/tournament/Op";
-import { Stats } from "@/components/tournament/Stats";
+import { FieldBreakdown, StatStrip, Stats } from "@/components/tournament/Stats";
+import { DeskHub, deskHubCount } from "@/components/tournament/DeskHub";
+import { LAYOUT } from "@/config/layout";
 import { Tabs } from "@/components/tournament/Tabs";
 import { WinnerPopup } from "@/components/tournament/WinnerPopup";
 import { dollars, formatWhen } from "@/lib/format";
@@ -60,7 +62,10 @@ export default async function TournamentPage({
   const onTeam = actor ? teamOf(agg, actor) : null;
   const open = agg.status !== "complete" && agg.status !== "cancelled";
   const registering = agg.status === "registration";
-  const deskCount = registering ? 0 : deskItems(agg, now).count;
+  // Layout experiments (src/config/layout.ts): each can be switched off on its own.
+  const hubDesk = isHost && LAYOUT.deskHub;
+  const hubBracket = LAYOUT.bracketHub;
+  const deskCount = hubDesk ? deskHubCount(agg, now) : registering ? 0 : deskItems(agg, now).count;
 
   type Tab = [key: string, label: string, count?: number];
   const rosterTeam = actor ? rosterTeamOf(agg, actor) : null;
@@ -68,20 +73,25 @@ export default async function TournamentPage({
   const openTickets = agg.tickets.filter((k) => k.status === "open" && (isHost || k.openedBy === actor)).length;
   const hasTeams = Object.keys(agg.state.teams).length > 0;
   const tabs: Tab[] = [];
-  if (registering) tabs.push(["bracket", "Registration"]);
-  else {
+  if (registering) {
+    tabs.push(["bracket", "Registration"]);
+    if (hubDesk) tabs.push(["desk", "Match desk", deskCount]);
+  } else {
     if (onTeam && !isHost) tabs.push(["match", "My match"]);
     tabs.push(["bracket", "Bracket"]);
     if (isHost) tabs.push(["desk", "Match desk", deskCount]);
     if (isHost && agg.status === "checkin") tabs.push(["checkin", "Check-in"]);
   }
-  if (hasTeams) tabs.push(["rosters", "Rosters"]);
-  if (hasTeams) tabs.push(["stats", "Stats"]);
-  tabs.push(["announce", "Announcements"]);
-  if (isHost || inEvent) tabs.push(["tickets", "Tickets", openTickets]);
-  if (isHost && open && !registering) tabs.push(["close", "Close"]);
+  if (hasTeams) tabs.push(["teams", "Teams"]);
+  if (hasTeams && !hubBracket) tabs.push(["stats", "Stats"]);
+  if (!hubDesk) tabs.push(["announce", "Announcements"]);
+  if ((isHost && !hubDesk) || (!isHost && inEvent)) tabs.push(["tickets", "Tickets", openTickets]);
+  if (isHost && open && !registering && !hubDesk) tabs.push(["close", "Close"]);
   if (isHost) tabs.push(["log", "Change log"]);
-  const tab = tabs.some((t) => t[0] === sp.tab) ? sp.tab! : tabs[0][0];
+  // Older links (notifications, bookmarks) to tabs that moved land where their content now lives.
+  const moved: Record<string, string> = { rosters: "teams", ...(hubBracket ? { stats: "bracket" } : {}), ...(hubDesk ? { announce: "desk", tickets: "desk", close: "desk" } : {}) };
+  const asked = sp.tab ? (moved[sp.tab] ?? sp.tab) : undefined;
+  const tab = tabs.some((t) => t[0] === asked) ? asked! : tabs[0][0];
 
   // Everything the tabs need, fetched together so switching tabs needs no further round trips.
   const [wins, signup, log] = await Promise.all([
@@ -185,17 +195,19 @@ export default async function TournamentPage({
               <Registration agg={agg} now={now} isHost={isHost} wins={wins} signup={signup} />
             ) : (
               <>
+                {hubBracket && <StatStrip agg={agg} />}
                 <FinalResults agg={agg} />
                 {isHost ? <HostBracket agg={agg} now={now} editable={open} wins={wins} /> : <BracketBoard {...boardProps(agg, now, { mine: onTeam, wins })} />}
+                {hubBracket && <FieldBreakdown agg={agg} folded />}
               </>
             ),
-          desk: isHost && !registering ? <Desk agg={agg} now={now} /> : null,
-          rosters: hasTeams ? <Rosters agg={agg} /> : null,
-          stats: hasTeams ? <Stats agg={agg} /> : null,
-          announce: <Announcements agg={agg} isHost={isHost} />,
-          tickets: isHost || inEvent ? <Tickets agg={agg} actor={actor} isHost={isHost} /> : null,
+          desk: hubDesk ? <DeskHub agg={agg} now={now} /> : isHost && !registering ? <Desk agg={agg} now={now} /> : null,
+          teams: hasTeams ? <Rosters agg={agg} /> : null,
+          stats: hasTeams && !hubBracket ? <Stats agg={agg} /> : null,
+          announce: hubDesk ? null : <Announcements agg={agg} isHost={isHost} />,
+          tickets: (isHost && !hubDesk) || (!isHost && inEvent) ? <Tickets agg={agg} actor={actor} isHost={isHost} /> : null,
           checkin: isHost && agg.status === "checkin" ? <Checkin agg={agg} /> : null,
-          close: isHost && open && !registering ? <ClosePanel agg={agg} /> : null,
+          close: isHost && open && !registering && !hubDesk ? <ClosePanel agg={agg} /> : null,
           match:
             actor && onTeam && !isHost && !registering ? (
               <>

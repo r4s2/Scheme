@@ -141,15 +141,48 @@ describe("bracket edits", () => {
 });
 
 describe("check-in and start", () => {
-  it("players check themselves in; the host replaces no-shows with subs", () => {
+  it("players check themselves in, and the host can force a check-in", () => {
     let t = checkin();
     const missing = t.state.teams["team-basalt"].players[4];
     expectRefused(() => op.checkIn(t, ctx("not-a-player")), "forbidden");
     t = op.checkIn(t, ctx(t.state.teams["team-drift"].players[2].handle)).agg;
     expect(t.state.teams["team-drift"].players[2].checkedIn).toBe(true);
-    t = op.replaceWithSub(t, ctx("kestrel"), "team-basalt", missing.handle, "sablewing").agg;
-    expect(t.state.teams["team-basalt"].players[4]).toMatchObject({ handle: "sablewing", checkedIn: true });
-    expect(t.subs.map((s) => s.handle)).not.toContain("sablewing");
+    expectRefused(() => op.markCheckedIn(t, ctx(missing.handle), "team-basalt", missing.handle), "forbidden");
+    t = op.markCheckedIn(t, ctx("kestrel"), "team-basalt", missing.handle).agg;
+    expect(t.state.teams["team-basalt"].players[4].checkedIn).toBe(true);
+  });
+
+  it("the host rejects a team; it keeps its spot and forfeits its matches", () => {
+    let t = checkin();
+    expectRefused(() => op.rejectTeam(t, ctx("zorra"), "team-basalt", ""), "forbidden");
+    const out = op.rejectTeam(t, ctx("kestrel"), "team-basalt", "Two players missing ranks");
+    t = out.agg;
+    expect(t.state.teams["team-basalt"].rejected).toBe("Two players missing ranks");
+    expect(out.effects.notices.map((n) => n.recipient)).toEqual(t.state.teams["team-basalt"].players.map((p) => p.handle));
+    expectRefused(() => op.rejectTeam(t, ctx("kestrel"), "team-basalt", ""), "conflict", /already rejected/);
+    // Reversible until play starts.
+    const back = op.reinstateTeam(t, ctx("kestrel"), "team-basalt").agg;
+    expect(back.state.teams["team-basalt"].rejected).toBeUndefined();
+    // Never fewer than two teams left.
+    let u = op.rejectTeam(t, ctx("kestrel"), "team-cinder", "").agg;
+    expect(u.state.teams["team-cinder"].rejected).toMatch(/requirements/);
+    expectRefused(() => op.rejectTeam(u, ctx("kestrel"), "team-drift", ""), "conflict", /two teams/);
+
+    const started = op.startTournament(t, ctx("kestrel"));
+    expect(started.message).toMatch(/1 match went to the opponents of rejected teams by forfeit/);
+    const m = buildBracket(started.agg.state).matches.find((x) => x.a === "team-basalt" || x.b === "team-basalt")!;
+    const r = resultOf(started.agg.state, m)!;
+    expect(r).toMatchObject({ by: "forfeit" });
+    expect(r.winner).not.toBe("team-basalt");
+    expect(started.effects.notices.filter((n) => n.kind === "start").map((n) => n.recipient)).not.toContain(t.state.teams["team-basalt"].players[0].handle);
+    expectRefused(() => op.reinstateTeam(started.agg, ctx("kestrel"), "team-basalt"), "conflict");
+
+    // Two rejected teams meeting: one advances and forfeits its next match too.
+    u = op.startTournament(u, ctx("kestrel")).agg;
+    const b = buildBracket(u.state);
+    const final = b.matches.find((x) => x.id === "M3")!;
+    expect(b.matches.filter((x) => resultOf(u.state, x)?.by === "forfeit").length).toBeGreaterThanOrEqual(2);
+    if (final.a && final.b) expect([u.state.teams[final.a].rejected, u.state.teams[final.b].rejected].filter(Boolean).length).toBeLessThan(2);
   });
 
   it("starting sets real deadlines", () => {

@@ -73,8 +73,10 @@ async function dispatch(name: string, agg: TournamentAgg, ctx: Ctx, fd: FormData
       return op.checkIn(agg, ctx);
     case "markCheckedIn":
       return op.markCheckedIn(agg, ctx, field(fd, "teamId"), field(fd, "handle"));
-    case "replaceWithSub":
-      return op.replaceWithSub(agg, ctx, field(fd, "teamId"), field(fd, "handle"), field(fd, "sub"));
+    case "rejectTeam":
+      return op.rejectTeam(agg, ctx, field(fd, "teamId"), String(fd.get("reason") ?? ""));
+    case "reinstateTeam":
+      return op.reinstateTeam(agg, ctx, field(fd, "teamId"));
     case "start":
       return op.startTournament(agg, ctx);
     case "recordResult": {

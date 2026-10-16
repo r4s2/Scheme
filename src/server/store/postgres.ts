@@ -156,7 +156,7 @@ export class PostgresStore implements Store {
         from tournaments t join profiles p on p.id = t.host_id
         where t.id = ${id}`,
       sql`
-        select tt.id, tt.name, cp.handle as captain,
+        select tt.id, tt.name, cp.handle as captain, tt.rejected_reason,
                coalesce(json_agg(json_strip_nulls(json_build_object(
                  'handle', p.handle, 'score', tp.rank_score, 'role', tp.role,
                  'verified', tp.rank_source, 'checkedIn', tp.checked_in_at is not null, 'karma', p.player_karma,
@@ -167,7 +167,7 @@ export class PostgresStore implements Store {
         left join tournament_players tp on tp.tournament_team_id = tt.id
         left join profiles p on p.id = tp.profile_id
         where tt.tournament_id = ${id}
-        group by tt.id, tt.name, cp.handle`,
+        group by tt.id, tt.name, cp.handle, tt.rejected_reason`,
       sql`select result_key, match_id, winner_team_id, w, l, source from match_results where tournament_id = ${id}`,
       sql`
         select r.id, r.match_id, r.team_id, p.handle as reporter, r.winner_team_id, r.w, r.l, r.created_at
@@ -207,6 +207,7 @@ export class PostgresStore implements Store {
       const all = r.players as (Player & { bench: boolean })[];
       const strip = ({ bench: _, ...p }: Player & { bench: boolean }): Player => (void _, p);
       teams[r.id] = { id: r.id, name: r.name, captain: r.captain, players: all.filter((p) => !p.bench).map(strip), bench: all.filter((p) => p.bench).map(strip) };
+      if (r.rejected_reason) teams[r.id].rejected = r.rejected_reason;
     }
 
     const resultMap: Record<string, MatchResult> = {};
@@ -348,9 +349,9 @@ export class PostgresStore implements Store {
       // Rosters: captains and players (check-ins, subs, swaps).
       // Teams: registration adds and removes them; afterwards only captains change.
       if (teamsChanged) {
-        const teamRows = Object.values(a.state.teams).map((t) => ({ id: t.id, tournament_id: a.id, name: t.name, captain_id: pid(t.captain) }));
+        const teamRows = Object.values(a.state.teams).map((t) => ({ id: t.id, tournament_id: a.id, name: t.name, captain_id: pid(t.captain), rejected_reason: t.rejected ?? null }));
         if (teamRows.length) {
-          await sql`insert into tournament_teams ${sql(teamRows)} on conflict (id) do update set captain_id = excluded.captain_id, name = excluded.name`;
+          await sql`insert into tournament_teams ${sql(teamRows)} on conflict (id) do update set captain_id = excluded.captain_id, name = excluded.name, rejected_reason = excluded.rejected_reason`;
         }
         if (prev.status === "registration") {
           await sql`delete from tournament_teams where tournament_id = ${a.id} and not (id = any(${sql.array(teamRows.map((t) => t.id))}::uuid[]))`;

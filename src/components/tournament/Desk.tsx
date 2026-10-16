@@ -4,15 +4,29 @@ import { deadlineOf, deskItems } from "@/server/views";
 import ui from "../ui.module.css";
 import { Hidden, Op } from "./Op";
 
-export function Desk({ agg, now }: { agg: TournamentAgg; now: Date }) {
+/**
+ * What needs the host during play: disputes, results waiting on the other
+ * captain, extension requests and overdue matches. With `hideEmpty`, only
+ * sections with something in them show, and an empty desk says so once.
+ */
+export function Desk({ agg, now, hideEmpty = false }: { agg: TournamentAgg; now: Date; hideEmpty?: boolean }) {
   if (agg.status !== "live") {
     return <p className={ui.muted}>The match desk fills up once the tournament starts: disputes, results waiting on confirmation, extension requests and overdue matches.</p>;
   }
   const d = deskItems(agg, now);
+  if (hideEmpty && d.count === 0) {
+    return (
+      <div className="desk-clear">
+        <b>Nothing needs you right now.</b>
+        <span className="small muted">Disputes, results waiting on a captain, extension requests and overdue matches show up here.</span>
+      </div>
+    );
+  }
   const tid = agg.id;
   const tab = "desk";
   const name = (id: string | null | undefined) => (id ? agg.state.teams[id]?.name ?? id : "TBD");
-  const Section = ({ title, n, children, empty }: { title: string; n: number; children: React.ReactNode; empty: string }) => (
+  const Section = ({ title, n, children, empty }: { title: string; n: number; children: React.ReactNode; empty: string }) =>
+    hideEmpty && !n ? null : (
     <section className={ui.section}>
       <h2 className={ui.sectionTitle}>
         {title} <span className={`${ui.pill} ${n ? ui.pillWarn : ""}`}>{n}</span>

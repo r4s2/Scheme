@@ -361,7 +361,7 @@ export function BracketBoard(props: BracketBoardProps) {
     flipKeys.add(id);
     return (
       <span
-        className={`team ${id === mine ? "is-mine" : ""} ${movable ? "movable" : "static"} ${selected !== null && selected === slot ? "selected" : ""}`}
+        className={`team ${id === mine ? "is-mine" : ""} ${state.teams[id]?.rejected ? "rejected" : ""} ${movable ? "movable" : "static"} ${selected !== null && selected === slot ? "selected" : ""}`}
         data-team={id}
         data-flip={key}
         data-slot={slot}
@@ -370,7 +370,7 @@ export function BracketBoard(props: BracketBoardProps) {
         role={movable ? "button" : undefined}
         aria-pressed={movable ? selected === slot : undefined}
         aria-label={movable ? `${name(id)}. ${selected === null ? "Press to pick up, then pick another team to swap." : selected === slot ? "Picked up. Pick another team to swap, or press again to put it down." : `Swap with ${name(state.slots[selected])}.`}` : undefined}
-        title={slot !== undefined && locked.has(slot) && host?.arrange ? "Locked: this team has a confirmed result" : undefined}
+        title={state.teams[id]?.rejected ? `Rejected: ${state.teams[id].rejected}` : slot !== undefined && locked.has(slot) && host?.arrange ? "Locked: this team has a confirmed result" : undefined}
         onPointerDown={
           movable
             ? (e) => {

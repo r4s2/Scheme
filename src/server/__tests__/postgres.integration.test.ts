@@ -194,6 +194,21 @@ describe.skipIf(!url)("PostgresStore (integration)", () => {
     await store.saveGameAccount("glint", val);
   });
 
+  it("saves a team rejected at check-in, and its forfeits once play starts", async () => {
+    const s = (await store.list()).find((t) => t.name === "Saturday Six-Stack Social")!;
+    let agg = (await store.get(s.id))!;
+    const basalt = teamByName(agg, "Team Basalt");
+    agg = await store.commit(agg, op.rejectTeam(agg, ctx("kestrel"), basalt, "No-show"));
+    expect((await store.get(s.id))!.state.teams[basalt].rejected).toBe("No-show");
+    agg = await store.commit(agg, op.reinstateTeam(agg, ctx("kestrel"), basalt));
+    expect((await store.get(s.id))!.state.teams[basalt].rejected).toBeUndefined();
+    agg = await store.commit(agg, op.rejectTeam(agg, ctx("kestrel"), basalt, "No-show"));
+    agg = await store.commit(agg, op.startTournament(agg, ctx("kestrel")));
+    const loaded = (await store.get(s.id))!;
+    expect(loaded.state.results).toEqual(agg.state.results);
+    expect(Object.values(loaded.state.results).filter((r) => r.by === "forfeit")).toHaveLength(1);
+  });
+
   it("keeps solo sign-ups and builds teams from them", async () => {
     const s = (await store.list()).find((t) => t.name === "Strategist Social")!;
     let agg = (await store.get(s.id))!;

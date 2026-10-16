@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 import type { HoverTeam } from "./hover";
 
 /**
@@ -77,10 +76,7 @@ export function HoverLayer({ teams, paused = false, children }: { teams: Record<
                 </span>
                 <span className="tiny muted">{p.sub ? `Sub · ${p.role}` : p.role}</span>
                 <span className="mono tiny">
-                  {p.rank}{" "}
-                  <span className={`vmark ${p.verified === "self" ? "self" : ""}`} title={p.verified === "self" ? "Self-reported rank" : "Verified rank"}>
-                    {p.verified === "self" ? <WarnIcon /> : <CheckIcon />}
-                  </span>
+                  {p.rank}
                 </span>
               </li>
             ))}

@@ -1,5 +1,4 @@
 import { rankShortName, type GameId, type Player, type Team } from "@/engine";
-import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 import type { TournamentAgg } from "@/server/model";
 
 function Line({ p, game, captain }: { p: Player; game: GameId; captain: string }) {
@@ -15,10 +14,7 @@ function Line({ p, game, captain }: { p: Player; game: GameId; captain: string }
       </span>
       <span className="tiny muted">{p.role}</span>
       <span className="mono tiny">
-        {rankShortName(game, p.score)}{" "}
-        <span className={`vmark ${p.verified === "self" ? "self" : ""}`} title={p.verified === "self" ? "Self-reported rank" : "Verified rank"}>
-          {p.verified === "self" ? <WarnIcon /> : <CheckIcon />}
-        </span>
+        {rankShortName(game, p.score)}
       </span>
     </li>
   );
@@ -27,6 +23,7 @@ function Line({ p, game, captain }: { p: Player; game: GameId; captain: string }
 /** One team's registered roster: starters, then subs. */
 export function RosterCard({ team, game, title }: { team: Team; game: GameId; title?: React.ReactNode }) {
   const bench = team.bench ?? [];
+  const self = [...team.players, ...bench].filter((p) => p.verified === "self").length;
   return (
     <div className="card" style={{ padding: "12px 14px" }}>
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -44,6 +41,11 @@ export function RosterCard({ team, game, title }: { team: Team; game: GameId; ti
           <Line key={p.handle} p={p} game={game} captain={team.captain} />
         ))}
       </ul>
+      {self > 0 && (
+        <p className="tiny muted" style={{ marginTop: 6 }}>
+          {self} self-reported rank{self === 1 ? "" : "s"}
+        </p>
+      )}
     </div>
   );
 }
@@ -55,7 +57,7 @@ export function Rosters({ agg }: { agg: TournamentAgg }) {
   return (
     <>
       <p className="small muted" style={{ marginBottom: 12 }}>
-        Rosters as registered. Subs can play any role; check a result screenshot against the full roster.
+        Every team as registered. Subs can play any role; check a result screenshot against the full roster.
       </p>
       <div className="roster-grid">
         {[...teams, ...rest].map((t) => (

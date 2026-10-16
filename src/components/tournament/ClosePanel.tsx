@@ -4,7 +4,8 @@ import { bracketOf } from "@/server/views";
 import ui from "../ui.module.css";
 import { Op } from "./Op";
 
-export function ClosePanel({ agg }: { agg: TournamentAgg }) {
+/** Closing or cancelling a live event. `bare` drops the card and title, for use inside the desk. */
+export function ClosePanel({ agg, bare = false }: { agg: TournamentAgg; bare?: boolean }) {
   if (agg.status !== "live") {
     return <p className={ui.muted}>{agg.status === "complete" ? "This tournament is already closed." : "Start the tournament before closing it."}</p>;
   }
@@ -17,8 +18,8 @@ export function ClosePanel({ agg }: { agg: TournamentAgg }) {
   const defaultMessage = `${agg.name} is closed. Congratulations to ${preview.places[0].map(name).join(" and ")}! Thanks to all ${agg.state.slots.length} teams for playing.`;
 
   return (
-    <div className={ui.card}>
-      <h3>Close {agg.name}</h3>
+    <div className={bare ? undefined : ui.card}>
+      {!bare && <h3>Close {agg.name}</h3>}
       <p className={ui.lead}>Closing locks results, credits leaderboard wins, sends everyone your message, and starts the 24-hour payout window.</p>
       <Op tid={tid} op="close" tab="bracket" className={ui.stack}>
         {b.complete ? (

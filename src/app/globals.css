@@ -561,3 +561,66 @@ form[data-pending] button { opacity: 0.6; pointer-events: none; }
 .gform .roles { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .gform .roles label { display: inline-flex; gap: 5px; align-items: center; font-size: 13.5px; }
 .roster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+
+/* Check-in */
+.checkin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.checkin-team { display: flex; flex-direction: column; min-width: 0; margin-bottom: 0; }
+.checkin-team.is-rejected { background: var(--surface-2); }
+.checkin-team.is-rejected h3 { color: var(--muted); text-decoration: line-through; }
+.checkin-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.checkin-head h3 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkin-list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.checkin-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.checkin-list li:first-child { border-top: 0; }
+.checkin-list .who { min-width: 0; overflow-wrap: anywhere; }
+.checkin-list .who small { display: block; color: var(--muted); font-size: 12.5px; }
+.checkin-rejected { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.checkin-reject { margin-top: auto; padding-top: 10px; }
+.checkin-reject summary { cursor: pointer; font-size: 13px; color: var(--muted); width: fit-content; }
+.checkin-reject summary:hover { color: var(--bad); }
+.checkin-reject-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.checkin-reject-form input { flex: 1 1 180px; min-width: 0; }
+
+/* Bracket board: a rejected team keeps its spot, struck through */
+.team.rejected .tn { text-decoration: line-through; color: var(--muted); }
+
+/* Bracket hub: the event's numbers in one slim line above the board */
+.statstrip { display: flex; flex-wrap: wrap; gap: 6px 0; margin: 0 0 14px; padding: 8px 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.statstrip > div { display: flex; flex-direction: column; padding: 0 16px; border-left: 1px solid var(--line); }
+.statstrip > div:first-child { border-left: 0; padding-left: 4px; }
+.statstrip dt { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.statstrip dd { margin: 0; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fold { margin-top: 16px; }
+.fold > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; list-style: none; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "▸"; color: var(--muted); font-size: 12px; transition: transform 0.15s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold[open] > summary { margin-bottom: 14px; }
+.breakdown { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 24px; }
+.breakdown h3 { font-size: 15px; margin-bottom: 4px; }
+@media (max-width: 760px) { .breakdown { grid-template-columns: 1fr; } }
+
+/* Host desk hub: the queue on the left, announcements and tickets in a rail */
+.desk-hub { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 20px; align-items: start; }
+@media (max-width: 960px) { .desk-hub { grid-template-columns: 1fr; } }
+.desk-main { min-width: 0; }
+.desk-h { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.desk-clear { display: flex; flex-direction: column; gap: 2px; padding: 16px; border: 1px dashed var(--line); border-radius: 14px; margin-bottom: 14px; }
+.desk-close { margin: 0 0 14px; }
+.desk-close.is-ready { border-color: var(--gold); }
+.desk-rail { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 76px; }
+@media (max-width: 960px) { .desk-rail { position: static; } }
+.widget { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.widget > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.widget > header h3 { font-size: 15px; margin: 0; }
+.widget-list { display: flex; flex-direction: column; }
+.widget-more > summary { cursor: pointer; font-size: 13px; color: var(--muted); width: fit-content; }
+.widget-more[open] > summary { margin-bottom: 8px; }
+.widget .log li { grid-template-columns: 1fr; gap: 2px; font-size: 13.5px; }
+.ticket.compact { border-top: 1px solid var(--line); padding: 8px 0; }
+.ticket.compact:first-child { border-top: 0; padding-top: 0; }
+.ticket.compact .thread { margin: 8px 0; }
+.ticket-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket.compact[open] .ticket-subject { white-space: normal; }
+.ticket-reply { flex: 1 1 220px; flex-wrap: nowrap; }
+.ticket-reply input { flex: 1; min-width: 0; }

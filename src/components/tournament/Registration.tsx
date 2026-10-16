@@ -1,7 +1,6 @@
 import { rankName, rankShortName, type Team } from "@/engine";
 import { hoverTeam } from "@/components/bracket/hover";
 import { HoverLayer } from "@/components/bracket/HoverLayer";
-import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 import { startText } from "@/lib/format";
 import type { TournamentAgg } from "@/server/model";
 import { capacity, fullRoster, rangeText, registeredCount, type EligibilityRules } from "@/server/registration";
@@ -186,10 +185,7 @@ export function Registration({ agg, now, isHost, wins, signup }: { agg: Tourname
                       </td>
                       <td className="muted">{p.role}</td>
                       <td className="num">
-                        {rankShortName(agg.game, p.score)}{" "}
-                        <span className={`vmark ${p.verified === "self" ? "self" : ""}`} title={p.verified === "self" ? "Self-reported rank" : "Verified rank"}>
-                          {p.verified === "self" ? <WarnIcon /> : <CheckIcon />}
-                        </span>
+                        {rankShortName(agg.game, p.score)}
                       </td>
                       <td className="num">{p.karma ?? "—"}</td>
                     </tr>

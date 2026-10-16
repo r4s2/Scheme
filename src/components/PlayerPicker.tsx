@@ -4,7 +4,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { GameId } from "@/engine";
 import { findPlayers, type PlayerHit } from "@/app/players/actions";
 import type { EligibilityRules } from "@/server/registration";
-import { CheckIcon, WarnIcon } from "@/components/ui/icons";
 
 /**
  * A handle box that searches Scheme players as you type. Pick a result with
@@ -191,10 +190,7 @@ export function PlayerPicker({
                     <b>{h.handle}</b>
                     {h.rank && (
                       <span className="mono tiny">
-                        {h.rank}{" "}
-                        <span className={`vmark ${h.verified === "self" ? "self" : ""}`} title={h.verified === "self" ? "Self-reported rank" : "Verified rank"}>
-                          {h.verified === "self" ? <WarnIcon /> : <CheckIcon />}
-                        </span>
+                        {h.rank}
                       </span>
                     )}
                   </span>

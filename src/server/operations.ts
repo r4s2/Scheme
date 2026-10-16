@@ -123,7 +123,33 @@ function wrapEngine<T>(fn: () => T): T {
 }
 
 /** Apply a result and its side effects (disputes resolved, reports cleared, champion notice). */
-function applyResult(
+/** Record a result, then forfeit any match it opens up for a rejected team. */
+function applyResult(agg: TournamentAgg, effects: Effects, ctx: Ctx, m: Match, winner: string, w: number, l: number, by: ResultSource) {
+  applyOne(agg, effects, ctx, m, winner, w, l, by);
+  settleRejected(agg, effects, ctx);
+}
+
+/**
+ * Rejected teams forfeit every match they'd play: whenever such a match has
+ * both teams, the other team wins it. (Two rejected teams: the first listed
+ * advances, and forfeits its next match in turn.) Returns how many were settled.
+ */
+function settleRejected(agg: TournamentAgg, effects: Effects, ctx: Ctx): number {
+  if (agg.status !== "live" || !Object.values(agg.state.teams).some((t) => t.rejected)) return 0;
+  let n = 0;
+  for (let guard = 0; guard < 512; guard++) {
+    const m = buildBracket(agg.state).matches.find(
+      (x) => x.a && x.b && !resultOf(agg.state, x) && (agg.state.teams[x.a]?.rejected || agg.state.teams[x.b]?.rejected),
+    );
+    if (!m) break;
+    const winner = agg.state.teams[m.a!]?.rejected && !agg.state.teams[m.b!]?.rejected ? m.b! : m.a!;
+    applyOne(agg, effects, ctx, m, winner, 0, 0, "forfeit");
+    n++;
+  }
+  return n;
+}
+
+function applyOne(
   agg: TournamentAgg,
   effects: Effects,
   ctx: Ctx,
@@ -205,27 +231,6 @@ export function markCheckedIn(agg: TournamentAgg, ctx: Ctx, teamId: string, hand
   return done(next, effects, `${handle} is checked in.`);
 }
 
-export function replaceWithSub(agg: TournamentAgg, ctx: Ctx, teamId: string, handle: string, subHandle: string): Outcome {
-  requireHost(agg, ctx);
-  requireOpen(agg);
-  const team = agg.state.teams[teamId];
-  if (!team) throw new OperationError("That team isn't in this tournament.", "not_found");
-  const idx = team.players.findIndex((p) => p.handle === handle);
-  if (idx < 0) throw new OperationError(`${handle} isn't on ${team.name}.`, "not_found");
-  const sub = agg.subs.find((s) => s.handle === subHandle);
-  if (!sub) throw new OperationError(`${subHandle} isn't on the free-agent list.`, "not_found");
-  const { next, effects } = begin(agg);
-  const players = [...team.players];
-  players[idx] = { ...sub, checkedIn: true };
-  const captain = team.captain === handle ? sub.handle : team.captain;
-  next.state = { ...agg.state, teams: { ...agg.state.teams, [teamId]: { ...team, players, captain } } };
-  next.subs = agg.subs.filter((s) => s.handle !== subHandle);
-  audit(effects, ctx, "roster.sub", `Replaced ${handle} with sub ${subHandle} on ${team.name}.`);
-  notify(effects, next, [subHandle], "roster", `You're playing for ${team.name} in ${next.name}.`);
-  notify(effects, next, [handle], "roster", `You were replaced on ${team.name} in ${next.name} after missing check-in.`);
-  return done(next, effects, `${subHandle} joins ${team.name}.`);
-}
-
 /** Number of scheduling waves the format needs (generous for double elimination). */
 function waveCount(agg: TournamentAgg): number {
   const n = agg.state.slots.length;
@@ -235,16 +240,59 @@ function waveCount(agg: TournamentAgg): number {
   return Math.max(1, Math.round(rounds));
 }
 
+/**
+ * The host rejects a team at check-in: it doesn't meet the requirements, or
+ * didn't show. The team keeps its spot so the bracket stays whole and
+ * forfeits its matches once play starts. Reversible until then.
+ */
+export function rejectTeam(agg: TournamentAgg, ctx: Ctx, teamId: string, reason: string): Outcome {
+  requireHost(agg, ctx);
+  if (agg.status !== "checkin") throw new OperationError("Teams can be rejected during check-in. Before that, remove them from registration.", "conflict");
+  const team = agg.state.teams[teamId];
+  if (!team) throw new OperationError("That team isn't in this tournament.", "not_found");
+  if (team.rejected) throw new OperationError(`${team.name} is already rejected.`, "conflict");
+  const why = reason.trim().replace(/\s+/g, " ").slice(0, 200) || "Didn't meet the event's requirements at check-in.";
+  if (Object.values(agg.state.teams).filter((t) => !t.rejected && t.id !== teamId).length < 2) {
+    throw new OperationError("At least two teams have to stay in to play.", "conflict");
+  }
+  const { next, effects } = begin(agg);
+  next.state = { ...agg.state, teams: { ...agg.state.teams, [teamId]: { ...team, rejected: why } } };
+  audit(effects, ctx, "checkin.reject", `Rejected ${team.name}: ${why}`);
+  notify(effects, next, [...team.players, ...(team.bench ?? [])].map((p) => p.handle), "checkin", `${team.name} was rejected from ${agg.name}: ${why}`);
+  return done(next, effects, `${team.name} is rejected. Its opponents will advance by forfeit.`);
+}
+
+export function reinstateTeam(agg: TournamentAgg, ctx: Ctx, teamId: string): Outcome {
+  requireHost(agg, ctx);
+  if (agg.status !== "checkin") throw new OperationError("Teams can only be reinstated before play starts.", "conflict");
+  const team = agg.state.teams[teamId];
+  if (!team?.rejected) throw new OperationError("That team isn't rejected.", "not_found");
+  const { next, effects } = begin(agg);
+  const { rejected: _, ...rest } = team;
+  void _;
+  next.state = { ...agg.state, teams: { ...agg.state.teams, [teamId]: rest } };
+  audit(effects, ctx, "checkin.reinstate", `Reinstated ${team.name}.`);
+  notify(effects, next, [...team.players, ...(team.bench ?? [])].map((p) => p.handle), "checkin", `${team.name} is back in ${agg.name}.`);
+  return done(next, effects, `${team.name} is back in.`);
+}
+
 export function startTournament(agg: TournamentAgg, ctx: Ctx): Outcome {
   requireHost(agg, ctx);
   if (agg.status !== "checkin" && agg.status !== "registration") throw new OperationError("This tournament has already started.", "conflict");
   const { next, effects } = begin(agg);
   next.status = "live";
   next.schedule = makeSchedule(ctx.now.toISOString(), agg.matchWindowHours, waveCount(agg));
-  const missing = Object.values(agg.state.teams).flatMap((t) => t.players.filter((p) => !p.checkedIn)).length;
-  audit(effects, ctx, "tournament.start", `Started the tournament.${missing ? ` ${missing} player(s) hadn't checked in.` : ""}`);
-  notify(effects, next, everyone(next), "start", `${next.name} has started. Your first match and lobby instructions are on your match page.`);
-  return done(next, effects, "Tournament started. Every team has their first match.");
+  const playing = Object.values(agg.state.teams).filter((t) => !t.rejected);
+  const missing = playing.flatMap((t) => t.players.filter((p) => !p.checkedIn)).length;
+  const rejected = Object.values(agg.state.teams).filter((t) => t.rejected);
+  audit(effects, ctx, "tournament.start", `Started the tournament.${missing ? ` ${missing} player(s) hadn't checked in.` : ""}${rejected.length ? ` ${rejected.map((t) => t.name).join(", ")} rejected.` : ""}`);
+  notify(effects, next, playing.flatMap((t) => [...t.players, ...(t.bench ?? [])].map((p) => p.handle)), "start", `${next.name} has started. Your first match and lobby instructions are on your match page.`);
+  const forfeits = settleRejected(next, effects, ctx);
+  return done(
+    next,
+    effects,
+    `Tournament started.${forfeits ? ` ${forfeits === 1 ? "1 match went" : `${forfeits} matches went`} to the opponents of rejected teams by forfeit.` : " Every team has their first match."}`,
+  );
 }
 
 /* ------------------------------------------------------------------ */
